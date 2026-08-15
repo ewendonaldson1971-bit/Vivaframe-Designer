@@ -1,12 +1,12 @@
 export type Heading = "N" | "E" | "S" | "W";
-export type Turn = "left" | "straight" | "right";
+export type Turn = "left" | "straight" | "right" | "back";
 export type Point = { x: number; y: number };
 export type Segment = { id: string; heading: Heading; length: number; turn: Turn };
-export type Design = { start: Point; initialHeading: Heading; segments: Segment[] };
+export type Design = { start: Point; initialHeading: Heading | null; segments: Segment[] };
 
 const headings: Heading[] = ["N", "E", "S", "W"];
 export function turnHeading(heading: Heading, turn: Turn): Heading {
-  const delta = turn === "left" ? -1 : turn === "right" ? 1 : 0;
+  const delta = turn === "left" ? -1 : turn === "right" ? 1 : turn === "back" ? 2 : 0;
   return headings[(headings.indexOf(heading) + delta + 4) % 4];
 }
 export function endpoint(point: Point, heading: Heading, length: number): Point {
@@ -34,7 +34,7 @@ export function summary(design: Design) {
 }
 export function historyFor(design: Design): string[] {
   const names: Record<Heading, string> = { N: "NORTH", E: "EAST", S: "SOUTH", W: "WEST" };
-  const result = [`START ${names[design.initialHeading]}`];
+  const result = [design.initialHeading ? `START ${names[design.initialHeading]}` : "START"];
   design.segments.forEach((s, index) => { result.push(`FORWARD ${s.length}`); if (design.segments[index + 1]) result.push(design.segments[index + 1].turn.toUpperCase()); });
   if (isClosed(design)) result.push("CLOSE");
   return result;
