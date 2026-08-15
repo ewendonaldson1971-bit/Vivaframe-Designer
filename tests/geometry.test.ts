@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { endpoint, geometryIssues, historyFor, isClosed, preparePricingTakeoff, rectangle, splitForStock, summary, turnHeading, type Design } from "../lib/geometry.ts";
+import { endpoint, geometryIssues, historyFor, isClosed, pointsFor, preparePricingTakeoff, rectangle, removeBoundarySegment, splitForStock, summary, turnHeading, type Design } from "../lib/geometry.ts";
 
 test("relative turns resolve to absolute headings",()=>{assert.equal(turnHeading("N","left"),"W");assert.equal(turnHeading("E","right"),"S");assert.equal(turnHeading("S","straight"),"S");assert.equal(turnHeading("N","back"),"S")});
 test("endpoints use integer millimetres",()=>{assert.deepEqual(endpoint({x:10,y:20},"W",1200),{x:-1190,y:20})});
 test("an uncommitted start does not presume a heading",()=>{const d:Design={start:{x:0,y:0},initialHeading:null,segments:[]};assert.deepEqual(historyFor(d),["START"]);assert.equal(summary(d).perimeter,0)});
 test("closed rectangle dimensions and mitres",()=>{const d=rectangle(1200,800);assert.equal(isClosed(d),true);assert.deepEqual(summary(d),{width:1200,height:800,perimeter:4000,stock:1,waste:1600,corners:4,mitres:8,closed:true})});
+test("removing the first segment advances the sequence start",()=>{const d=removeBoundarySegment(rectangle(1200,800),"start");assert.deepEqual(d.start,{x:1200,y:0});assert.equal(d.segments.length,3);assert.equal(d.segments[0].turn,"straight");assert.equal(d.initialHeading,"S")});
+test("removing the last segment preserves the sequence start",()=>{const d=removeBoundarySegment(rectangle(1200,800),"end");assert.deepEqual(d.start,{x:0,y:0});assert.equal(d.segments.length,3);assert.equal(d.initialHeading,"E");assert.deepEqual(pointsFor(d).at(-1),{x:0,y:800})});
 test("segments over stock length split and require a straight joiner",()=>{assert.deepEqual(splitForStock(12000),[5600,5600,800]);const t=preparePricingTakeoff(rectangle(6000,800),"vf40","natural");assert.equal(t.cutPieces.length,6);assert.deepEqual(t.accessories.find(a=>a.mappingKey==="straight_joiner"),{mappingKey:"straight_joiner",quantity:2})});
 test("self intersections are reported",()=>{const d:Design={start:{x:0,y:0},initialHeading:"E",segments:[{id:"a",heading:"E",length:1000,turn:"straight"},{id:"b",heading:"S",length:1000,turn:"right"},{id:"c",heading:"W",length:500,turn:"right"},{id:"d",heading:"N",length:1500,turn:"right"}]};assert.equal(geometryIssues(d).some(i=>i.type==="intersection"),true)});
 test("overlapping collinear pieces are reported",()=>{const d:Design={start:{x:0,y:0},initialHeading:"E",segments:[{id:"a",heading:"E",length:1000,turn:"straight"},{id:"b",heading:"W",length:500,turn:"right"},{id:"c",heading:"W",length:800,turn:"straight"}]};assert.equal(geometryIssues(d).some(i=>i.type==="overlap"),true)});

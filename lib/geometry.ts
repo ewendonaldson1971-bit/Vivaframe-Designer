@@ -18,6 +18,21 @@ export function pointsFor(design: Design): Point[] {
   design.segments.forEach((segment) => points.push(endpoint(points.at(-1)!, segment.heading, segment.length)));
   return points;
 }
+export function removeBoundarySegment(design: Design, boundary: "start" | "end"): Design {
+  if (!design.segments.length) return design;
+  if (boundary === "end") {
+    const segments = design.segments.slice(0, -1);
+    return { ...design, initialHeading: segments[0]?.heading ?? null, segments };
+  }
+  const first = design.segments[0];
+  const segments = design.segments.slice(1).map((segment, index) => index === 0 ? { ...segment, turn: "straight" as Turn } : segment);
+  return {
+    ...design,
+    start: endpoint(design.start, first.heading, first.length),
+    initialHeading: segments[0]?.heading ?? null,
+    segments,
+  };
+}
 export function isClosed(design: Design): boolean {
   const p = pointsFor(design);
   return design.segments.length > 2 && p[0].x === p.at(-1)!.x && p[0].y === p.at(-1)!.y;
