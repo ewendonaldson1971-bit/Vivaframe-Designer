@@ -41,7 +41,7 @@ export default function Designer() {
   function changeLength(id:string, length:number) { setDesign(d => ({...d,segments:d.segments.map(s=>s.id===id?{...s,length:Math.max(1,Math.round(length))}:s)})); }
   function selectSegment(id:string){setSelected(id);setSelectedEnd(null);setSelectionNotice("")}
   function selectEnd(boundary:"start"|"end"){setSelected("");setSelectedEnd(boundary);setSelectionNotice("")}
-  function addSegment() { if(!startPlaced||!direction||nextLength<=0)return; const boundary:"start"|"end"=design.segments.length&&selectedEnd==="start"?"start":"end",id=`s${Date.now()}`; setDesign(d=>addBoundarySegment(d,boundary,direction,nextLength,id));setAdditionHistory(h=>[...h,boundary]);setSelected("");setSelectedEnd(boundary);setSelectionNotice("");setDirection(null); }
+  function addSegment() { if(!startPlaced||!direction||nextLength<=0)return; const boundary:"start"|"end"=design.segments.length&&selectedEnd==="start"?"start":"end",id=`s${Date.now()}`,nextDesign=addBoundarySegment(design,boundary,direction,nextLength,id);setDesign(nextDesign);fitDesign(nextDesign);setAdditionHistory(h=>[...h,boundary]);setSelected("");setSelectedEnd(boundary);setSelectionNotice("");setDirection(null); }
   function beginDimensionEdit(id:string,length:number){selectSegment(id);setEditingDimension(id);setDimensionDraft(String(length));}
   function commitDimensionEdit(){if(editingDimension){const value=Number(dimensionDraft);if(Number.isFinite(value)&&value>0)changeLength(editingDimension,value)}setEditingDimension(null)}
   function undo(){ if(design.segments.length){const boundary=additionHistory.at(-1)??"end";setDesign(d=>removeBoundarySegment(d,boundary));setAdditionHistory(h=>h.slice(0,-1));setSelected("");setSelectedEnd(boundary);setSelectionNotice("")} }
@@ -53,7 +53,7 @@ export default function Designer() {
     setDesign(d=>removeBoundarySegment(d,boundary!));setAdditionHistory([]);setSelected("");setSelectedEnd(null);setSelectionNotice("");setEditingDimension(null);setDirection(null);
   }
   function placeStart(e:ReactMouseEvent<SVGSVGElement>){
-    if(startPlaced)return;
+    if(design.segments.length)return;
     const svg=e.currentTarget,rect=svg.getBoundingClientRect(),point=svg.createSVGPoint();
     const localX=e.clientX-rect.left,localY=e.clientY-rect.top,grid=20;
     point.x=rect.left+rect.width/2+Math.round((localX-rect.width/2)/grid)*grid;
@@ -61,12 +61,13 @@ export default function Designer() {
     const placed=point.matrixTransform(svg.getScreenCTM()!.inverse());
     setDesign(blankDesign());setCanvasOrigin({x:placed.x,y:placed.y});setStartPlaced(true);setSelectedEnd("end");setSelectionNotice("");setAdditionHistory([]);
   }
-  function fitFrame(){
-    if(!design.segments.length){setZoom(1);setCanvasOrigin({x:310,y:210});return}
-    const minX=Math.min(...points.map(p=>p.x)),maxX=Math.max(...points.map(p=>p.x)),minY=Math.min(...points.map(p=>p.y)),maxY=Math.max(...points.map(p=>p.y));
+  function fitDesign(target:Design){
+    if(!target.segments.length){setZoom(1);setCanvasOrigin({x:310,y:210});return}
+    const targetPoints=pointsFor(target),minX=Math.min(...targetPoints.map(p=>p.x)),maxX=Math.max(...targetPoints.map(p=>p.x)),minY=Math.min(...targetPoints.map(p=>p.y)),maxY=Math.max(...targetPoints.map(p=>p.y));
     const scale=Math.min(.2,420/Math.max(maxX-minX,1),275/Math.max(maxY-minY,1)),nextZoom=Math.max(.25,Math.min(2,scale/.1)),effectiveScale=.1*nextZoom;
-    setZoom(nextZoom);setCanvasOrigin({x:310-((minX+maxX)/2-design.start.x)*effectiveScale,y:210-((minY+maxY)/2-design.start.y)*effectiveScale});
+    setZoom(nextZoom);setCanvasOrigin({x:310-((minX+maxX)/2-target.start.x)*effectiveScale,y:210-((minY+maxY)/2-target.start.y)*effectiveScale});
   }
+  function fitFrame(){fitDesign(design)}
   useEffect(()=>{ const key=(e:KeyboardEvent)=>{const target=e.target as HTMLElement;if(["INPUT","SELECT","TEXTAREA"].includes(target.tagName))return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){e.preventDefault();undo()}else if(e.key==="Delete"){e.preventDefault();deleteSelection()}else if(e.key==="ArrowLeft")setDirection("W");else if(e.key==="ArrowUp")setDirection("N");else if(e.key==="ArrowRight")setDirection("E");else if(e.key==="ArrowDown")setDirection("S");else if(e.key==="Enter")addSegment();}; window.addEventListener("keydown",key); return()=>window.removeEventListener("keydown",key); });
   function exportDesign(){ const a=document.createElement("a"),blob=new Blob([JSON.stringify({schemaVersion:1,name:"Reception display frame",design,productIds:{profile,finish}},null,2)],{type:"application/json"});a.href=URL.createObjectURL(blob);a.download="vivaframe-design.json";a.click();URL.revokeObjectURL(a.href); }
   async function importDesign(file?:File){if(!file)return;const data=JSON.parse(await file.text());setDesign(data.design);setStartPlaced(true);setCanvasOrigin({x:310,y:210});setAdditionHistory([]);setSelectedEnd("end");setProfile(data.productIds?.profile||"ss25");setFinish(data.productIds?.finish||"natural-anodised");}
@@ -80,19 +81,22 @@ export default function Designer() {
         <div className="panel-title"><span>VF</span><div><h1>VivaFrame Designer</h1><small>Frame configuration</small></div></div>
         <Section title="DESIGN"><label>Short Name<input defaultValue="Reception display frame"/></label><label>QTY<input type="number" min="1" defaultValue="1"/></label></Section>
         <Section title="MATERIAL"><label>Extrusion Profile<select value={profile} onChange={e=>setProfile(e.target.value)}><option value="ss25">SS25 — 25 × 40 mm</option><option value="vf40">VF40 — 40 mm profile</option></select></label><label>Finish<select value={finish} onChange={e=>setFinish(e.target.value)}><option value="natural-anodised">Natural anodised</option><option value="black-anodised">Black anodised</option><option value="white-powdercoat">White powder coat</option></select></label></Section>
-        <Section title="NEXT SEGMENT"><p className="instruction">{!startPlaced?"Click any grid point to place the start.":stats.closed?"Frame closed. Select either end to extend it.":`Adding at the ${selectedEnd==="start"?"start":"end"}. Choose a direction and length.`}</p><div className="directions">{([["N","↑","Up"],["W","←","Left"],["E","→","Right"],["S","↓","Down"]] as [Heading,string,string][]).map(([value,arrow,label])=><button key={value} className={direction===value?"chosen":""} onClick={()=>setDirection(value)} disabled={!startPlaced}><b>{arrow}</b>{label}</button>)}</div><label className="next-length">Length<input type="number" min="1" step={snap?50:1} value={nextLength} onChange={e=>setNextLength(Number(e.target.value))} onKeyDown={e=>{if(e.key==="Enter")addSegment()}}/><span>mm</span></label><button className="add-segment" onClick={addSegment} disabled={!startPlaced||!direction||nextLength<=0}>Add segment at {selectedEnd==="start"?"start":"end"}</button><button className="undo" onClick={undo}>↶ Undo last segment <kbd>⌘Z</kbd></button></Section>
+        <Section title="NEXT SEGMENT"><p className="instruction">{!startPlaced?"Click any grid point to place the start.":stats.closed?"Frame closed. Select either end to extend it.":`Adding at the ${selectedEnd==="start"?"start":"end"}. Choose a direction and length.`}</p><div className="directions">{([["N","↑","Up"],["W","←","Left"],["E","→","Right"],["S","↓","Down"]] as [Heading,string,string][]).map(([value,arrow,label])=><button key={value} className={`dir-${value.toLowerCase()} ${direction===value?"chosen":""}`} onClick={()=>setDirection(value)} disabled={!startPlaced}><b>{arrow}</b>{label}</button>)}</div><label className="next-length">Length<input type="number" min="1" step={snap?50:1} value={nextLength} onChange={e=>setNextLength(Number(e.target.value))} onKeyDown={e=>{if(e.key==="Enter")addSegment()}}/><span>mm</span></label><button className="add-segment" onClick={addSegment} disabled={!startPlaced||!direction||nextLength<=0}>Add segment at {selectedEnd==="start"?"start":"end"}</button><button className="undo" onClick={undo}>↶ Undo last segment <kbd>⌘Z</kbd></button></Section>
       </aside>
       <section className="stage">
         <div className="stage-head"><div><h2>Build Preview</h2><span className={stats.closed?"success":"open-status"}>{stats.closed?"✓ Closed frame":startPlaced?"Open frame":"Place start point"}</span></div><div className="tools"><button onClick={()=>setZoom(z=>Math.min(2,z+.1))}>＋</button><button onClick={()=>setZoom(z=>Math.max(.25,z-.1))}>−</button><button onClick={fitFrame}>Fit frame</button><label><input type="checkbox" checked={snap} onChange={e=>setSnap(e.target.checked)}/><i/>Snap 50 mm</label></div></div>
         <div className={`canvas ${snap?"grid":""}`}>
-          <svg viewBox="0 0 620 420" className={!startPlaced?"placing":""} onClick={placeStart} role={startPlaced?"img":"button"} tabIndex={!startPlaced?0:undefined} aria-label={startPlaced?(design.segments.length?`Frame ${stats.width} by ${stats.height} millimetres`:"Starting point placed; choose a direction"):"Click a grid point to place the starting point"}>
+          <svg viewBox="0 0 620 420" className={!design.segments.length?"placing":""} onClick={placeStart} role={design.segments.length?"img":"button"} tabIndex={!design.segments.length?0:undefined} aria-label={startPlaced?(design.segments.length?`Frame ${stats.width} by ${stats.height} millimetres`:"Starting point placed; click elsewhere to move it or choose a direction"):"Click a grid point to place the starting point"}>
             {startPlaced&&<>
             {design.segments.map((s,i)=>{const a=xy(points[i]),b=xy(points[i+1]),mx=(a.x+b.x)/2,my=(a.y+b.y)/2,len=Math.hypot(b.x-a.x,b.y-a.y)||1,ox=-(b.y-a.y)/len,oy=(b.x-a.x)/len;return <g key={s.id} className={selected===s.id?"selected":""} onClick={()=>selectSegment(s.id)}><line className="hit" x1={a.x} y1={a.y} x2={b.x} y2={b.y}/><line className="rail" x1={a.x} y1={a.y} x2={b.x} y2={b.y}/><line className="face" x1={a.x} y1={a.y} x2={b.x} y2={b.y}/><line className="profile-highlight" x1={a.x+ox*5} y1={a.y+oy*5} x2={b.x+ox*5} y2={b.y+oy*5}/><line className="profile-groove" x1={a.x-ox*3} y1={a.y-oy*3} x2={b.x-ox*3} y2={b.y-oy*3}/>{editingDimension===s.id?<foreignObject x={mx-48} y={my-18} width="96" height="36" onClick={e=>e.stopPropagation()}><input className="dimension-edit" autoFocus inputMode="numeric" value={dimensionDraft} onChange={e=>setDimensionDraft(e.target.value)} onBlur={commitDimensionEdit} onKeyDown={e=>{if(e.key==="Enter")commitDimensionEdit();if(e.key==="Escape")setEditingDimension(null)}} aria-label={`Edit segment ${i+1} length in millimetres`}/></foreignObject>:<g className="dimension-label" transform={`translate(${mx} ${my})`} onClick={e=>{e.stopPropagation();beginDimensionEdit(s.id,s.length)}} role="button" tabIndex={0} aria-label={`Edit ${s.length} millimetre dimension`} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();beginDimensionEdit(s.id,s.length)}}}><rect x="-38" y="-13" width="76" height="26" rx="4"/><text dy="4" textAnchor="middle">{s.length} mm</text></g>}</g>})}
+            {design.segments.slice(1).map((_,i)=>{const index=i+1;return <CornerHardware key={`corner-${index}`} point={xy(points[index])} before={xy(points[index-1])} after={xy(points[index+1])}/>})}
+            {stats.closed&&<CornerHardware point={xy(points[0])} before={xy(points.at(-2)!)} after={xy(points[1])}/>}
             {points.map((p,i)=>{const q=xy(p),isStart=i===0,isEnd=i===points.length-1&&points.length>1;if(isStart||isEnd){const endType:"start"|"end"=isEnd||points.length===1?"end":"start";return <g key={i} className={`selectable-point ${selectedEnd===endType?"point-selected":""}`} onClick={e=>{e.stopPropagation();selectEnd(endType)}} role="button" tabIndex={0} aria-label={`Select ${points.length===1?"starting":endType} point`} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();selectEnd(endType)}}}><circle className="point-hit" cx={q.x} cy={q.y} r="16"/><circle cx={q.x} cy={q.y} r="8" className={isStart?"start":"current"}/></g>}return <circle key={i} cx={q.x} cy={q.y} r="4" className="joint"/>})}
             </>}
           </svg>
           {!startPlaced&&<div className="place">＋ Click any grid intersection to place the starting point</div>}
-          <div className="legend"><span><i className="start-dot"/>Start</span><span><i className="current-dot"/>Current</span><span className="profile-key">{profile==="ss25"?"SS25 · 40 mm visible face":"VF40 profile"}</span></div>
+          {startPlaced&&!design.segments.length&&<div className="reposition-hint">Click another grid point to reposition the start</div>}
+          <div className="legend"><span><i className="start-dot"/>Unselected end</span><span><i className="current-dot"/>Selected end</span><span className="profile-key">{profile==="ss25"?"SS25 · 40 mm visible face":"VF40 profile"}</span></div>
         </div>
         <div className="stage-foot"><span className={selectionNotice?"selection-error":""}>{selectionNotice||(selectedEnd?`${selectedEnd==="start"?"Start":"End"} point selected · New segments extend here; Delete removes the adjacent segment.`:selected?"Segment selected · Delete is available only at the beginning or end of the sequence.":"Orthogonal drawing · dimensions in millimetres")}</span><b>{Math.round(zoom*100)}%</b></div>
         <section className="history"><button onClick={()=>setHistoryOpen(v=>!v)}><span><b>Construction history</b><small>Generated from the frame</small></span>{historyOpen?"⌄":"⌃"}</button>{historyOpen&&<div>{historyFor(design).map((line,i)=><code key={i}><em>{String(i+1).padStart(2,"0")}</em>{line}</code>)}</div>}</section>
@@ -105,6 +109,18 @@ export default function Designer() {
       </aside>
     </main>
   </div>;
+}
+
+type CanvasPoint = {x:number;y:number};
+function CornerHardware({point,before,after}:{point:CanvasPoint;before:CanvasPoint;after:CanvasPoint}){
+  const unit=(target:CanvasPoint)=>{const dx=target.x-point.x,dy=target.y-point.y,length=Math.hypot(dx,dy)||1;return {x:dx/length,y:dy/length}},incoming=unit(before),outgoing=unit(after);
+  if(Math.abs(incoming.x*outgoing.x+incoming.y*outgoing.y)>.15)return null;
+  const bisectorLength=Math.hypot(incoming.x+outgoing.x,incoming.y+outgoing.y)||1,bisector={x:(incoming.x+outgoing.x)/bisectorLength,y:(incoming.y+outgoing.y)/bisectorLength},arms=[incoming,outgoing];
+  return <g className="corner-hardware" aria-hidden="true">
+    <line className="mitre-seam" x1={point.x-bisector.x*9} y1={point.y-bisector.y*9} x2={point.x+bisector.x*9} y2={point.y+bisector.y*9}/>
+    {arms.map((arm,index)=><line key={`plate-${index}`} className="corner-plate" x1={point.x+arm.x*7+bisector.x*3} y1={point.y+arm.y*7+bisector.y*3} x2={point.x+arm.x*34+bisector.x*3} y2={point.y+arm.y*34+bisector.y*3}/>) }
+    {arms.flatMap((arm,index)=>[17,28].map(distance=><circle key={`fixing-${index}-${distance}`} className="corner-fixing" cx={point.x+arm.x*distance+bisector.x*3} cy={point.y+arm.y*distance+bisector.y*3} r="2.2"/>))}
+  </g>;
 }
 
 function Section({title,children}:{title:string;children:React.ReactNode}){return <section><h2>{title}</h2>{children}</section>}
