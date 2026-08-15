@@ -18,6 +18,33 @@ export function pointsFor(design: Design): Point[] {
   design.segments.forEach((segment) => points.push(endpoint(points.at(-1)!, segment.heading, segment.length)));
   return points;
 }
+function relativeTurn(from: Heading, to: Heading): Turn {
+  const delta = (headings.indexOf(to) - headings.indexOf(from) + 4) % 4;
+  return delta === 0 ? "straight" : delta === 1 ? "right" : delta === 2 ? "back" : "left";
+}
+export function addBoundarySegment(design: Design, boundary: "start" | "end", outwardHeading: Heading, length: number, id: string): Design {
+  const roundedLength = Math.max(1, Math.round(length));
+  if (boundary === "start" && design.segments.length) {
+    const heading = turnHeading(outwardHeading, "back");
+    const first = design.segments[0];
+    return {
+      ...design,
+      start: endpoint(design.start, outwardHeading, roundedLength),
+      initialHeading: heading,
+      segments: [
+        { id, heading, length: roundedLength, turn: "straight" },
+        { ...first, turn: relativeTurn(heading, first.heading) },
+        ...design.segments.slice(1),
+      ],
+    };
+  }
+  const last = design.segments.at(-1);
+  return {
+    ...design,
+    initialHeading: design.initialHeading ?? outwardHeading,
+    segments: [...design.segments, { id, heading: outwardHeading, length: roundedLength, turn: last ? relativeTurn(last.heading, outwardHeading) : "straight" }],
+  };
+}
 export function removeBoundarySegment(design: Design, boundary: "start" | "end"): Design {
   if (!design.segments.length) return design;
   if (boundary === "end") {
