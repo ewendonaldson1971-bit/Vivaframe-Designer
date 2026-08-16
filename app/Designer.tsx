@@ -2,7 +2,7 @@
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { addBoundarySegment, Design, Heading, historyFor, pointsFor, prepareFrameTakeoff, removeBoundarySegment, splitForStock, summary } from "../lib/geometry";
-import { connectFramePricing, quoteFrame, type FramePricingConfig, type FramePricingQuote } from "../lib/pricing-client";
+import { connectFramePricing, connectFramePricingInteractively, quoteFrame, type FramePricingConfig, type FramePricingQuote } from "../lib/pricing-client";
 
 type Tab = "summary" | "cuts" | "bom";
 type PricingState = "connecting" | "ready" | "loading" | "error" | "disconnected";
@@ -37,6 +37,7 @@ export default function Designer() {
   const points = useMemo(() => pointsFor(design), [design]);
   const takeoff = useMemo(() => prepareFrameTakeoff(design, profile, finish), [design, profile, finish]);
   useEffect(()=>{connectFramePricing(config=>setPricingConfig(config)).then(connected=>setPricing(connected?"ready":"disconnected")).catch(error=>{setPricingError(error instanceof Error?error.message:"Pricing Engine is unavailable.");setPricing("error")})},[]);
+  const connectPricing=useCallback(async()=>{setPricing("connecting");setPricingError("");try{const connected=await connectFramePricingInteractively(config=>setPricingConfig(config));setPricing(connected?"ready":"disconnected")}catch(error){setPricingError(error instanceof Error?error.message:"Pricing Engine is unavailable.");setPricing("error")}},[]);
   const recalculate=useCallback(async()=>{if(!stats.closed||!pricingConfig)return;setPricing("loading");setPricingError("");try{setQuote(await quoteFrame(takeoff));setPricing("ready")}catch(error){setQuote(null);setPricingError(error instanceof Error?error.message:"Pricing Engine is unavailable.");setPricing("error")}},[pricingConfig,stats.closed,takeoff]);
   useEffect(()=>{if(!stats.closed||!pricingConfig)return;const timer=window.setTimeout(()=>{void recalculate()},400);return()=>window.clearTimeout(timer)},[recalculate,stats.closed,pricingConfig]);
   const sx = .1 * zoom;
@@ -115,7 +116,7 @@ export default function Designer() {
       </section>
       <aside className="results">
         <div className="tabs" role="tablist">{(["summary","cuts","bom"] as Tab[]).map(t=><button key={t} className={tab===t?"active":""} onClick={()=>setTab(t)}>{t==="summary"?"Summary":t==="cuts"?"Cut list":"BOM"}</button>)}</div>
-        {tab==="summary"&&<Summary stats={stats} count={design.segments.length} pricing={pricing} pricingError={pricingError} quote={quote} connected={!!pricingConfig} onRecalculate={recalculate}/>}
+        {tab==="summary"&&<Summary stats={stats} count={design.segments.length} pricing={pricing} pricingError={pricingError} quote={quote} connected={!!pricingConfig} onConnect={connectPricing} onRecalculate={recalculate}/>}
         {tab==="cuts"&&<CutList design={design} selected={selected} changeLength={changeLength}/>}
         {tab==="bom"&&<Bom takeoff={takeoff}/>}
       </aside>
@@ -136,15 +137,15 @@ function CornerHardware({point,before,after}:{point:CanvasPoint;before:CanvasPoi
 }
 
 function Section({title,children}:{title:string;children:React.ReactNode}){return <section><h2>{title}</h2>{children}</section>}
-function Summary({stats,count,pricing,pricingError,quote,connected,onRecalculate}:{stats:ReturnType<typeof summary>;count:number;pricing:PricingState;pricingError:string;quote:FramePricingQuote|null;connected:boolean;onRecalculate:()=>void}){
-  const status = pricing === "connecting" ? ["Connecting to Pricing Engine", "Checking your Vivalux Builder pricing session."] : pricing === "error" ? ["Pricing context is not connected", pricingError||"Open Vivalux Builder and sign in, then reload this page."] : connected ? ["Pricing Engine connected", stats.closed ? "Current customer pricing is ready." : "Complete the frame to calculate current pricing."] : ["Pricing context is not connected", "Open Vivalux Builder and sign in, then reload this page."];
+function Summary({stats,count,pricing,pricingError,quote,connected,onConnect,onRecalculate}:{stats:ReturnType<typeof summary>;count:number;pricing:PricingState;pricingError:string;quote:FramePricingQuote|null;connected:boolean;onConnect:()=>void;onRecalculate:()=>void}){
+  const status = pricing === "connecting" ? ["Connecting to Pricing Engine", "Checking your Vivalux Builder pricing session."] : pricing === "error" ? ["Pricing context is not connected", pricingError||"Select Connect pricing to use your Vivalux Builder session."] : connected ? ["Pricing Engine connected", stats.closed ? "Current customer pricing is ready." : "Complete the frame to calculate current pricing."] : ["Pricing context is not connected", "Select Connect pricing to use your signed-in Vivalux Builder session."];
   return <>
     <div className={stats.closed?"complete":"frame-progress"}><span>{stats.closed?"✓":"＋"}</span><div><b>{stats.closed?"Frame is complete":count?"Frame is open":"Ready to draw"}</b><small>{stats.closed?"All segments form a closed path.":count?"Add segments until the current point returns to the start.":"Place a start point, choose a direction and enter a length."}</small></div></div>
     <Section title="Frame summary"><dl>{[["Overall width",`${stats.width.toLocaleString()} mm`],["Overall height",`${stats.height.toLocaleString()} mm`],["Total perimeter",`${stats.perimeter.toLocaleString()} mm`],["Extrusion pieces",count],["90° corners",stats.corners],["45° mitre cuts",stats.mitres]].map(([a,b])=><div key={a}><dt>{a}</dt><dd>{b}</dd></div>)}</dl></Section>
     <Section title="Stock estimate"><div className="stock"><b>{stats.stock}</b><span><strong>× 5,600 mm lengths</strong><small>Estimated stock requirement</small></span></div><div className="waste"><span>Estimated material waste</span><b>{stats.waste.toLocaleString()} mm</b><i><em style={{width:stats.stock?`${Math.max(3,stats.waste/(stats.stock*5600)*100)}%`:"0%"}}/></i></div></Section>
     <Section title="Pricing">
       {quote && typeof quote.total === "number" ? <div className="quoted"><small>Calculated total</small><strong>{formatMoney(quote.total, quote.currency)}</strong></div> : <div className={`pricing-state ${pricing === "error" ? "pricing-error" : ""}`}><b>{pricing === "connecting" ? "…" : pricing === "error" ? "!" : "i"}</b><span><strong>{status[0]}</strong><small>{status[1]}</small></span></div>}
-      <button className="primary" onClick={onRecalculate} disabled={!connected||!stats.closed||pricing==="loading"}>{pricing === "loading" ? "Calculating…" : "Recalculate price"}</button>
+      {!connected?<button className="primary" onClick={onConnect} disabled={pricing==="connecting"}>{pricing==="connecting"?"Connecting…":"Connect pricing"}</button>:<button className="primary" onClick={onRecalculate} disabled={!stats.closed||pricing==="loading"}>{pricing === "loading" ? "Calculating…" : "Recalculate price"}</button>}
       {quote?.calculatedAt&&<p className="last">Last calculated {new Date(quote.calculatedAt).toLocaleString("en-AU")}</p>}
     </Section>
   </>;
