@@ -35,13 +35,13 @@ test("uses the SAV Builder login pattern and dedicated VivaFrame endpoints",asyn
   Object.defineProperty(globalThis,"fetch",{configurable:true,value:async(url:string,init?:RequestInit)=>{
     calls.push(`${init?.method||"GET"} ${new URL(url).pathname}`);
     if(url.endsWith("/api/auth/token"))return Response.json({token:"short-lived-token",user:{username:"ewen"}});
-    if(url.endsWith("/api/v1/config/vivaframe")){assert.equal((init?.headers as Record<string,string>).Authorization,"Bearer short-lived-token");return Response.json({config:{extrusions:[]}})}
+    if(url.endsWith("/api/v1/config/vivaframe")){assert.equal((init?.headers as Record<string,string>).Authorization,"Bearer short-lived-token");return Response.json({config:{extrusions:[],eligibleExtrusions:[{id:"vivaframe-ss25",label:"VivaFrame SS25",extrusionId:"extrusion-008",enabled:true,position:0,source:null}]}})}
     if(url.endsWith("/api/v1/pricing/vivaframe/quote"))return Response.json({total:456,currency:"AUD"});
     return Response.json({error:"not found"},{status:404});
   }});
   let applied:unknown;
   assert.equal(await loginFramePricing("ewen","password",config=>{applied=config}),"ewen");
-  assert.deepEqual(applied,{extrusions:[]});
+  assert.deepEqual(applied,{extrusions:[],eligibleExtrusions:[{id:"vivaframe-ss25",label:"VivaFrame SS25",extrusionId:"extrusion-008",enabled:true,position:0,source:null}]});
   assert.equal(pricingUsername(),"ewen");
   assert.deepEqual(await quoteFrame(takeoff),{total:456,currency:"AUD"});
   assert.deepEqual(calls,["POST /api/auth/token","GET /api/v1/config/vivaframe","POST /api/v1/pricing/vivaframe/quote"]);

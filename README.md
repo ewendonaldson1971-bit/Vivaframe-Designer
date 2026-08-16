@@ -21,7 +21,7 @@ The repository is linked to Netlify. A push to `main` runs the production build 
 
 The designer uses the same temporary authentication pattern as SAV Builder. A user connects with their existing Apps Script credentials; the Pricing Engine returns a short-lived bearer token which is kept only in browser session storage. Passwords are never stored by the designer.
 
-After login the client loads the shared Extrusions table from `GET /api/v1/config/vivaframe` and sends product-neutral frame takeoffs to `POST /api/v1/pricing/vivaframe/quote`. Prices, accessory mappings, account discounting and the authoritative total remain server-side.
+After login the client loads the eligible extrusion list configured in the Pricing Engine's Frame Designer tab from `GET /api/v1/config/vivaframe`. The Material selector, cut list and BOM use those live options. Product-neutral frame takeoffs are sent to `POST /api/v1/pricing/vivaframe/quote`; eligibility, prices, accessory mappings, account discounting and the authoritative total remain server-side.
 
 For another host, the equivalent provider contract is:
 
