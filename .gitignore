@@ -39,6 +39,8 @@ yarn-error.log*
 /.wrangler/
 /outputs/
 /work/
+/output/
+/tmp/
 
 # Netlify local state
 /.netlify/
