@@ -74,6 +74,25 @@ export function summary(design: Design) {
   const corners = closed ? design.segments.length : Math.max(0, design.segments.length - 1);
   return { ...bounds(design), perimeter, stock, waste: stock * 5600 - perimeter, corners, mitres: corners * 2, closed };
 }
+export function summaryForDesigns(designs: Design[]) {
+  const nonEmpty = designs.filter(design => design.segments.length);
+  const allPoints = designs.flatMap(pointsFor);
+  const xs = allPoints.map(point => point.x), ys = allPoints.map(point => point.y);
+  const perimeter = designs.reduce((total, design) => total + design.segments.reduce((sum, segment) => sum + segment.length, 0), 0);
+  const stock = Math.ceil(perimeter / 5600);
+  const summaries = designs.map(summary);
+  const corners = summaries.reduce((total, item) => total + item.corners, 0);
+  return {
+    width: xs.length ? Math.max(...xs) - Math.min(...xs) : 0,
+    height: ys.length ? Math.max(...ys) - Math.min(...ys) : 0,
+    perimeter,
+    stock,
+    waste: stock * 5600 - perimeter,
+    corners,
+    mitres: corners * 2,
+    closed: nonEmpty.length > 0 && nonEmpty.every(isClosed),
+  };
+}
 export function historyFor(design: Design): string[] {
   const names: Record<Heading, string> = { N: "NORTH", E: "EAST", S: "SOUTH", W: "WEST" };
   const result = [design.initialHeading ? `START ${names[design.initialHeading]}` : "START"];
@@ -120,4 +139,16 @@ export function prepareFrameTakeoff(design: Design, profileId: string, finishId:
   const cutPieces = design.segments.flatMap(s => splitForStock(s.length).map((lengthMm, i, all) => ({ lengthMm, leftCut: (i === 0 ? "45" : "90") as "45"|"90", rightCut: (i === all.length - 1 ? "45" : "90") as "45"|"90" })));
   const joins = cutPieces.length - design.segments.length;
   return { profileId, finishId, quantity, cutPieces, accessories: [{ mappingKey: "corner_component", quantity: summary(design).corners }, ...(joins ? [{ mappingKey: "straight_joiner", quantity: joins }] : [])] };
+}
+export function prepareFrameTakeoffForDesigns(designs: Design[], profileId: string, finishId: string, quantity = 1): FrameTakeoff {
+  const takeoffs = designs.filter(design => design.segments.length).map(design => prepareFrameTakeoff(design, profileId, finishId));
+  const accessoryQuantities = new Map<string,number>();
+  takeoffs.flatMap(takeoff => takeoff.accessories).forEach(accessory => accessoryQuantities.set(accessory.mappingKey,(accessoryQuantities.get(accessory.mappingKey)??0)+accessory.quantity));
+  return {
+    profileId,
+    finishId,
+    quantity,
+    cutPieces: takeoffs.flatMap(takeoff => takeoff.cutPieces),
+    accessories: [...accessoryQuantities].map(([mappingKey,accessoryQuantity]) => ({mappingKey,quantity:accessoryQuantity})),
+  };
 }
