@@ -1,6 +1,6 @@
 # VivaFrame Designer
 
-Standalone VivaFrame SS25 frame designer, built with Next.js and deployed on Netlify. The interface follows Vivad's brand system and intentionally has no login, Builder navigation, or cart UI.
+Standalone VivaFrame SS25 frame designer, built with Next.js and deployed on Netlify. The interface follows Vivad's brand system and has no Builder navigation or cart UI.
 
 ## Local development
 
@@ -19,11 +19,9 @@ The repository is linked to Netlify. A push to `main` runs the production build 
 
 ## Pricing Engine integration
 
-The designer generates a product-neutral frame takeoff and connects to pricing only when authenticated context is supplied. This keeps credentials out of the standalone site and allows Vivalux Builder to host the designer later.
+The designer uses the same temporary authentication pattern as SAV Builder. A user connects with their existing Apps Script credentials; the Pricing Engine returns a short-lived bearer token which is kept only in browser session storage. Passwords are never stored by the designer.
 
-When the designer runs inside Vivalux Builder, it automatically uses Builder's existing `window.VivaluxPricing` service. The service registers the `vivaframe` product configuration and sends takeoffs through the authenticated quote workflow.
-
-The standalone Netlify site links to `https://vivalux4-client.netlify.app/vivaframe/` for authenticated pricing. Vivalux serves that route as a reverse proxy, so the designer can use the existing Vivalux session without moving its bearer token to another origin.
+After login the client loads the shared Extrusions table from `GET /api/v1/config/vivaframe` and sends product-neutral frame takeoffs to `POST /api/v1/pricing/vivaframe/quote`. Prices, accessory mappings, account discounting and the authoritative total remain server-side.
 
 For another host, the equivalent provider contract is:
 
@@ -47,9 +45,10 @@ window.VivaFramePricingContext = {
 };
 ```
 
-The fallback uses the established contracts:
+The direct integration uses these contracts:
 
-- `GET /api/v1/config/vivalux?product=vivaframe`
-- `POST /api/v1/pricing/vivalux/quote` with `{ product: "vivaframe", takeoff }`
+- `POST /api/auth/token`
+- `GET /api/v1/config/vivaframe`
+- `POST /api/v1/pricing/vivaframe/quote` with `{ takeoff }`
 
 Never commit a Pricing Engine token or expose a durable service credential in frontend code. Authentication and customer/account selection remain the responsibility of the host application.

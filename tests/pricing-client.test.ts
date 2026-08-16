@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { connectFramePricing, quoteFrame, type FramePricingProvider } from "../lib/pricing-client.ts";
+import { connectFramePricing, disconnectFramePricing, loginFramePricing, pricingUsername, quoteFrame, type FramePricingProvider } from "../lib/pricing-client.ts";
 import type { FrameTakeoff } from "../lib/geometry.ts";
 
 const takeoff:FrameTakeoff = {profileId:"ss25",finishId:"natural-anodised",quantity:1,cutPieces:[],accessories:[]};
@@ -9,7 +9,7 @@ function installWindow(value:Record<string,unknown>={}){
   Object.defineProperty(globalThis,"window",{configurable:true,value});
 }
 
-afterEach(()=>{delete (globalThis as {window?:unknown}).window});
+afterEach(()=>{delete (globalThis as {window?:unknown}).window;delete (globalThis as {fetch?:unknown}).fetch});
 
 test("reports a disconnected state when the host supplies no pricing context",async()=>{
   installWindow();
@@ -29,15 +29,22 @@ test("passes the vivaframe product and takeoff through the host provider",async(
   assert.deepEqual(calls,["config:vivaframe","quote:vivaframe"]);
 });
 
-test("connects directly to the pricing service supplied by Vivalux Builder",async()=>{
-  const calls:string[]=[];
-  installWindow({VivaluxPricing:{
-    async register(product:string,apply:(config:Record<string,unknown>)=>void){calls.push(`register:${product}`);apply({profiles:["ss25"]});return true},
-    async quote(product:string,received:FrameTakeoff){calls.push(`quote:${product}`);assert.equal(received,takeoff);return {total:456,currency:"AUD"}},
+test("uses the SAV Builder login pattern and dedicated VivaFrame endpoints",async()=>{
+  const values=new Map<string,string>(),calls:string[]=[];
+  installWindow({sessionStorage:{getItem:(key:string)=>values.get(key)||null,setItem:(key:string,value:string)=>values.set(key,value),removeItem:(key:string)=>values.delete(key)}});
+  Object.defineProperty(globalThis,"fetch",{configurable:true,value:async(url:string,init?:RequestInit)=>{
+    calls.push(`${init?.method||"GET"} ${new URL(url).pathname}`);
+    if(url.endsWith("/api/auth/token"))return Response.json({token:"short-lived-token",user:{username:"ewen"}});
+    if(url.endsWith("/api/v1/config/vivaframe")){assert.equal((init?.headers as Record<string,string>).Authorization,"Bearer short-lived-token");return Response.json({config:{extrusions:[]}})}
+    if(url.endsWith("/api/v1/pricing/vivaframe/quote"))return Response.json({total:456,currency:"AUD"});
+    return Response.json({error:"not found"},{status:404});
   }});
   let applied:unknown;
-  assert.equal(await connectFramePricing(config=>{applied=config}),true);
-  assert.deepEqual(applied,{profiles:["ss25"]});
+  assert.equal(await loginFramePricing("ewen","password",config=>{applied=config}),"ewen");
+  assert.deepEqual(applied,{extrusions:[]});
+  assert.equal(pricingUsername(),"ewen");
   assert.deepEqual(await quoteFrame(takeoff),{total:456,currency:"AUD"});
-  assert.deepEqual(calls,["register:vivaframe","quote:vivaframe"]);
+  assert.deepEqual(calls,["POST /api/auth/token","GET /api/v1/config/vivaframe","POST /api/v1/pricing/vivaframe/quote"]);
+  disconnectFramePricing();
+  assert.equal(pricingUsername(),"");
 });
