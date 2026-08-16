@@ -115,8 +115,8 @@ export function rectangle(width = 2400, height = 1800): Design {
   ] };
 }
 
-export type PricingTakeoff = { profileId: string; finishId: string; quantity: number; cutPieces: { lengthMm: number; leftCut: "45" | "90"; rightCut: "45" | "90" }[]; accessories: { mappingKey: string; quantity: number }[] };
-export function preparePricingTakeoff(design: Design, profileId: string, finishId: string, quantity = 1): PricingTakeoff {
+export type FrameTakeoff = { profileId: string; finishId: string; quantity: number; cutPieces: { lengthMm: number; leftCut: "45" | "90"; rightCut: "45" | "90" }[]; accessories: { mappingKey: string; quantity: number }[] };
+export function prepareFrameTakeoff(design: Design, profileId: string, finishId: string, quantity = 1): FrameTakeoff {
   const cutPieces = design.segments.flatMap(s => splitForStock(s.length).map((lengthMm, i, all) => ({ lengthMm, leftCut: (i === 0 ? "45" : "90") as "45"|"90", rightCut: (i === all.length - 1 ? "45" : "90") as "45"|"90" })));
   const joins = cutPieces.length - design.segments.length;
   return { profileId, finishId, quantity, cutPieces, accessories: [{ mappingKey: "corner_component", quantity: summary(design).corners }, ...(joins ? [{ mappingKey: "straight_joiner", quantity: joins }] : [])] };
