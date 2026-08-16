@@ -29,14 +29,15 @@ export default function Designer() {
   const [saved, setSaved] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(true);
   const [pricing, setPricing] = useState<PricingState>("connecting");
+  const [pricingError, setPricingError] = useState("");
   const [quote, setQuote] = useState<FramePricingQuote|null>(null);
   const [pricingConfig, setPricingConfig] = useState<FramePricingConfig|null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const stats = useMemo(() => summary(design), [design]);
   const points = useMemo(() => pointsFor(design), [design]);
   const takeoff = useMemo(() => prepareFrameTakeoff(design, profile, finish), [design, profile, finish]);
-  useEffect(()=>{connectFramePricing(config=>setPricingConfig(config)).then(connected=>setPricing(connected?"ready":"disconnected")).catch(()=>setPricing("error"))},[]);
-  const recalculate=useCallback(async()=>{if(!stats.closed||!pricingConfig)return;setPricing("loading");try{setQuote(await quoteFrame(takeoff));setPricing("ready")}catch{setQuote(null);setPricing("error")}},[pricingConfig,stats.closed,takeoff]);
+  useEffect(()=>{connectFramePricing(config=>setPricingConfig(config)).then(connected=>setPricing(connected?"ready":"disconnected")).catch(error=>{setPricingError(error instanceof Error?error.message:"Pricing Engine is unavailable.");setPricing("error")})},[]);
+  const recalculate=useCallback(async()=>{if(!stats.closed||!pricingConfig)return;setPricing("loading");setPricingError("");try{setQuote(await quoteFrame(takeoff));setPricing("ready")}catch(error){setQuote(null);setPricingError(error instanceof Error?error.message:"Pricing Engine is unavailable.");setPricing("error")}},[pricingConfig,stats.closed,takeoff]);
   useEffect(()=>{if(!stats.closed||!pricingConfig)return;const timer=window.setTimeout(()=>{void recalculate()},400);return()=>window.clearTimeout(timer)},[recalculate,stats.closed,pricingConfig]);
   const sx = .1 * zoom;
   const xy = (p:{x:number;y:number}) => ({x:canvasOrigin.x+(p.x-design.start.x)*sx,y:canvasOrigin.y+(p.y-design.start.y)*sx});
@@ -114,7 +115,7 @@ export default function Designer() {
       </section>
       <aside className="results">
         <div className="tabs" role="tablist">{(["summary","cuts","bom"] as Tab[]).map(t=><button key={t} className={tab===t?"active":""} onClick={()=>setTab(t)}>{t==="summary"?"Summary":t==="cuts"?"Cut list":"BOM"}</button>)}</div>
-        {tab==="summary"&&<Summary stats={stats} count={design.segments.length} pricing={pricing} quote={quote} connected={!!pricingConfig} onRecalculate={recalculate}/>}
+        {tab==="summary"&&<Summary stats={stats} count={design.segments.length} pricing={pricing} pricingError={pricingError} quote={quote} connected={!!pricingConfig} onRecalculate={recalculate}/>}
         {tab==="cuts"&&<CutList design={design} selected={selected} changeLength={changeLength}/>}
         {tab==="bom"&&<Bom takeoff={takeoff}/>}
       </aside>
@@ -135,8 +136,8 @@ function CornerHardware({point,before,after}:{point:CanvasPoint;before:CanvasPoi
 }
 
 function Section({title,children}:{title:string;children:React.ReactNode}){return <section><h2>{title}</h2>{children}</section>}
-function Summary({stats,count,pricing,quote,connected,onRecalculate}:{stats:ReturnType<typeof summary>;count:number;pricing:PricingState;quote:FramePricingQuote|null;connected:boolean;onRecalculate:()=>void}){
-  const status = pricing === "connecting" ? ["Connecting to Pricing Engine", "Checking for an authenticated pricing context."] : pricing === "error" ? ["Pricing Engine unavailable", "The current price could not be calculated. Try again when the connection is available."] : connected ? ["Ready to calculate", stats.closed ? "Current customer pricing is connected." : "Complete the frame to calculate current pricing."] : ["Pricing context not connected", "Authenticated customer pricing can be supplied by the host application."];
+function Summary({stats,count,pricing,pricingError,quote,connected,onRecalculate}:{stats:ReturnType<typeof summary>;count:number;pricing:PricingState;pricingError:string;quote:FramePricingQuote|null;connected:boolean;onRecalculate:()=>void}){
+  const status = pricing === "connecting" ? ["Connecting to Pricing Engine", "Checking your Vivalux Builder pricing session."] : pricing === "error" ? ["Pricing context is not connected", pricingError||"Open Vivalux Builder and sign in, then reload this page."] : connected ? ["Pricing Engine connected", stats.closed ? "Current customer pricing is ready." : "Complete the frame to calculate current pricing."] : ["Pricing context is not connected", "Open Vivalux Builder and sign in, then reload this page."];
   return <>
     <div className={stats.closed?"complete":"frame-progress"}><span>{stats.closed?"✓":"＋"}</span><div><b>{stats.closed?"Frame is complete":count?"Frame is open":"Ready to draw"}</b><small>{stats.closed?"All segments form a closed path.":count?"Add segments until the current point returns to the start.":"Place a start point, choose a direction and enter a length."}</small></div></div>
     <Section title="Frame summary"><dl>{[["Overall width",`${stats.width.toLocaleString()} mm`],["Overall height",`${stats.height.toLocaleString()} mm`],["Total perimeter",`${stats.perimeter.toLocaleString()} mm`],["Extrusion pieces",count],["90° corners",stats.corners],["45° mitre cuts",stats.mitres]].map(([a,b])=><div key={a}><dt>{a}</dt><dd>{b}</dd></div>)}</dl></Section>

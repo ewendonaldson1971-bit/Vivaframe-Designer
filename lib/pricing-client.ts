@@ -1,6 +1,7 @@
 import type { FrameTakeoff } from "./geometry";
 
 const DEFAULT_API_BASE = "https://vivadpricing-app.calmtree-53cc02bb.australiasoutheast.azurecontainerapps.io";
+const BRIDGE_ORIGIN = "https://vivalux4-client.netlify.app";
 const PRODUCT_KEY = "vivaframe";
 
 export type FramePricingConfig = Record<string, unknown>;
@@ -13,6 +14,7 @@ type VivaluxPricingService = {
   register(product:string,apply:(config:FramePricingConfig)=>void):Promise<boolean>;
   quote(product:string,takeoff:FrameTakeoff):Promise<FramePricingQuote>;
 };
+type BridgeResponse = { source?:string;ready?:boolean;id?:string;result?:unknown;error?:string };
 
 declare global {
   interface Window {
@@ -49,6 +51,47 @@ function directProvider(context:{token:string;apiBase?:string}):FramePricingProv
   };
 }
 
-function provider(){return window.VivaFramePricingProvider||(window.VivaluxPricing?vivaluxProvider(window.VivaluxPricing):null)||(window.VivaFramePricingContext?.token?directProvider(window.VivaFramePricingContext):null)}
+let cachedBridgeProvider:FramePricingProvider|null=null;
+function bridgeProvider():FramePricingProvider|null {
+  if(typeof document==="undefined"||!document.body)return null;
+  if(cachedBridgeProvider)return cachedBridgeProvider;
+  const frame=document.createElement("iframe");
+  frame.src=`${BRIDGE_ORIGIN}/pricing-bridge.html`;
+  frame.title="Vivalux pricing connection";
+  frame.hidden=true;
+  const pending=new Map<string,{resolve:(value:unknown)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
+  let readyResolve:()=>void;
+  let readyReject:(error:Error)=>void;
+  const ready=new Promise<void>((resolve,reject)=>{readyResolve=resolve;readyReject=reject});
+  const readyTimer=setTimeout(()=>readyReject(new Error("Open Vivalux Builder and sign in to connect customer pricing.")),10000);
+  window.addEventListener("message",event=>{
+    if(event.origin!==BRIDGE_ORIGIN||event.source!==frame.contentWindow)return;
+    const response=event.data as BridgeResponse;
+    if(response.source!=="vivalux-pricing-bridge")return;
+    if(response.ready){clearTimeout(readyTimer);readyResolve();return}
+    if(!response.id)return;
+    const request=pending.get(response.id);
+    if(!request)return;
+    clearTimeout(request.timer);pending.delete(response.id);
+    if(response.error)request.reject(new Error(response.error));else request.resolve(response.result);
+  });
+  document.body.appendChild(frame);
+  const request=async(action:"config"|"quote",takeoff?:FrameTakeoff)=>{
+    await ready;
+    const id=`vivaframe-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return new Promise<unknown>((resolve,reject)=>{
+      const timer=setTimeout(()=>{pending.delete(id);reject(new Error("Pricing Engine did not respond."))},15000);
+      pending.set(id,{resolve,reject,timer});
+      frame.contentWindow?.postMessage({source:"vivaframe-designer",id,action,takeoff},BRIDGE_ORIGIN);
+    });
+  };
+  cachedBridgeProvider={
+    loadConfig:async()=>await request("config") as {config?:FramePricingConfig},
+    quote:async(_product,takeoff)=>await request("quote",takeoff) as FramePricingQuote,
+  };
+  return cachedBridgeProvider;
+}
+
+function provider(){return window.VivaFramePricingProvider||(window.VivaluxPricing?vivaluxProvider(window.VivaluxPricing):null)||(window.VivaFramePricingContext?.token?directProvider(window.VivaFramePricingContext):null)||bridgeProvider()}
 export async function connectFramePricing(apply:(config:FramePricingConfig)=>void){const active=provider();if(!active)return false;const payload=await active.loadConfig(PRODUCT_KEY);if(!payload?.config)return false;apply(payload.config);return true}
-export async function quoteFrame(takeoff:FrameTakeoff){const active=provider();if(!active)throw new Error("Pricing Engine context is not connected.");return active.quote(PRODUCT_KEY,takeoff)}
+export async function quoteFrame(takeoff:FrameTakeoff){const active=provider();if(!active)throw new Error("Pricing Engine context is not connected.");const payload=await active.quote(PRODUCT_KEY,takeoff);const calculation=payload.calculation&&typeof payload.calculation==="object"?payload.calculation as FramePricingQuote:payload;const rawTotal=calculation.total;const total=typeof rawTotal==="number"?rawTotal:rawTotal&&typeof rawTotal==="object"&&"sell" in rawTotal?Number((rawTotal as {sell:unknown}).sell):undefined;return {...calculation,...(typeof total==="number"&&Number.isFinite(total)?{total}:{})}}
