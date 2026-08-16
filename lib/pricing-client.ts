@@ -8,7 +8,8 @@ const PRODUCT_KEY = "vivaframe";
 export type ExtrusionConfigRow = { id:string; extrusion:string; weight:number; width:number; height:number; unit:string; priceSilver:number; braceOffset:number|null; horizontalCrossBraceSpacing:number|null; verticalCrossBraceSpacing:number|null };
 export type EligibleExtrusionConfigRow = { id:string; label:string; extrusionId:string|null; enabled:boolean; position:number; source:ExtrusionConfigRow|null };
 export type FramePricingConfig = { extrusions:ExtrusionConfigRow[]; eligibleExtrusions:EligibleExtrusionConfigRow[]; [key:string]:unknown };
-export type FramePricingQuote = { subtotal?:number; discount?:number; tax?:number; total?:number; currency?:string; lines?:unknown[]; calculatedAt?:string; [key:string]:unknown };
+export type FramePricingQuoteLine = { key:string; description:string; quantity:number; unit:string; unitPrice:number; total:number };
+export type FramePricingQuote = { subtotal?:number; discount?:number; discountPercentage?:number; tax?:number; total?:number; currency?:string; lines?:FramePricingQuoteLine[]; calculatedAt?:string; [key:string]:unknown };
 export type FramePricingProvider = {
   loadConfig(product:string):Promise<{config?:FramePricingConfig;version?:string|number}>;
   quote(product:string,takeoff:FrameTakeoff):Promise<FramePricingQuote>;
