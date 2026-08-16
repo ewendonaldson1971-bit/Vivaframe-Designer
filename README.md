@@ -21,7 +21,9 @@ The repository is linked to Netlify. A push to `main` runs the production build 
 
 The designer generates a product-neutral frame takeoff and connects to pricing only when authenticated context is supplied. This keeps credentials out of the standalone site and allows Vivalux Builder to host the designer later.
 
-The preferred host contract is:
+When the designer runs inside Vivalux Builder, it automatically uses Builder's existing `window.VivaluxPricing` service. The service registers the `vivaframe` product configuration and sends takeoffs through the authenticated quote workflow.
+
+For another host, the equivalent provider contract is:
 
 ```js
 window.VivaFramePricingProvider = {
