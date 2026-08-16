@@ -152,7 +152,12 @@ export function crossBracePieces(design:Design,config:BraceConfig):BracePiece[]{
   horizontalRaw.forEach(raw=>{
     const crossings=verticalRaw.filter(vertical=>vertical.x>raw.x1&&vertical.x<raw.x2&&raw.y>vertical.y1&&raw.y<vertical.y2).map(vertical=>vertical.x).sort((a,b)=>a-b);
     if(!crossings.length){const cut=shorten({x:raw.x1,y:raw.y},{x:raw.x2,y:raw.y},config.braceOffset);pieces.push({id:`h-${raw.yIndex}-${raw.spanIndex}`,kind:"h-brace",orientation:"horizontal",...cut,widthMm:config.hBraceWidth,tensionLocks:2});return}
-    [raw.x1,...crossings,raw.x2].slice(0,-1).forEach((x1,pieceIndex)=>{const x2=[...crossings,raw.x2][pieceIndex],cut=shorten({x:x1,y:raw.y},{x:x2,y:raw.y},25);pieces.push({id:`m-${raw.yIndex}-${raw.spanIndex}-${pieceIndex}`,kind:"mini-brace",orientation:"horizontal",...cut,widthMm:config.miniBraceWidth,tensionLocks:2})});
+    const boundaries=[raw.x1,...crossings,raw.x2],lastPieceIndex=boundaries.length-2;
+    [0,lastPieceIndex].filter((pieceIndex,index,all)=>all.indexOf(pieceIndex)===index).forEach(pieceIndex=>{
+      const x1=boundaries[pieceIndex],x2=boundaries[pieceIndex+1],lengthMm=Math.max(1,Math.round(x2-x1-25));
+      const start={x:x1+(pieceIndex===lastPieceIndex?config.hBraceWidth/2:0),y:raw.y},end={x:x2-(pieceIndex===0?config.hBraceWidth/2:0),y:raw.y};
+      pieces.push({id:`m-${raw.yIndex}-${raw.spanIndex}-${pieceIndex}`,kind:"mini-brace",orientation:"horizontal",start,end,lengthMm,widthMm:config.miniBraceWidth,tensionLocks:2});
+    });
   });
   return pieces;
 }
