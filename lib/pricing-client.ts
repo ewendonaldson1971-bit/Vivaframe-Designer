@@ -14,7 +14,6 @@ type VivaluxPricingService = {
   register(product:string,apply:(config:FramePricingConfig)=>void):Promise<boolean>;
   quote(product:string,takeoff:FrameTakeoff):Promise<FramePricingQuote>;
 };
-type BridgeResponse = { source?:string;ready?:boolean;id?:string;result?:unknown;error?:string };
 
 declare global {
   interface Window {
@@ -51,48 +50,14 @@ function directProvider(context:{token:string;apiBase?:string}):FramePricingProv
   };
 }
 
-let popupProvider:FramePricingProvider|null=null;
-let pricingPopup:Window|null=null;
-async function openBridgeProvider():Promise<FramePricingProvider> {
-  if(typeof window==="undefined")throw new Error("Pricing connection is available in the browser.");
-  pricingPopup=window.open(`${BRIDGE_ORIGIN}/pricing-bridge.html`,"vivalux-pricing-bridge","popup,width=460,height=260");
-  if(!pricingPopup)throw new Error("Allow the Vivalux pricing window, then try again.");
-  const pending=new Map<string,{resolve:(value:unknown)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
-  let readyResolve!:()=>void;
-  let readyReject!:(error:Error)=>void;
-  const ready=new Promise<void>((resolve,reject)=>{readyResolve=resolve;readyReject=reject});
-  const readyTimer=setTimeout(()=>readyReject(new Error("Open Vivalux Builder and sign in to connect customer pricing.")),10000);
-  const receive=(event:MessageEvent)=>{
-    if(event.origin!==BRIDGE_ORIGIN||event.source!==pricingPopup)return;
-    const response=event.data as BridgeResponse;
-    if(response.source!=="vivalux-pricing-bridge")return;
-    if(response.ready){clearTimeout(readyTimer);readyResolve();return}
-    if(!response.id)return;
-    const request=pending.get(response.id);
-    if(!request)return;
-    clearTimeout(request.timer);pending.delete(response.id);
-    if(response.error)request.reject(new Error(response.error));else request.resolve(response.result);
-  };
-  window.addEventListener("message",receive);
-  const request=async(action:"config"|"quote",takeoff?:FrameTakeoff)=>{
-    await ready;
-    if(!pricingPopup||pricingPopup.closed)throw new Error("Reopen the Vivalux pricing connection.");
-    const id=`vivaframe-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    return new Promise<unknown>((resolve,reject)=>{
-      const timer=setTimeout(()=>{pending.delete(id);reject(new Error("Pricing Engine did not respond."))},15000);
-      pending.set(id,{resolve,reject,timer});
-      pricingPopup?.postMessage({source:"vivaframe-designer",id,action,takeoff},BRIDGE_ORIGIN);
-    });
-  };
-  popupProvider={
-    loadConfig:async()=>await request("config") as {config?:FramePricingConfig},
-    quote:async(_product,takeoff)=>await request("quote",takeoff) as FramePricingQuote,
-  };
-  await ready;
-  return popupProvider;
+function loadScript(src:string){return new Promise<void>((resolve,reject)=>{const existing=document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);if(existing){resolve();return}const script=document.createElement("script");script.src=src;script.onload=()=>resolve();script.onerror=()=>reject(new Error("Vivalux pricing services could not be loaded."));document.head.appendChild(script)})}
+async function ensureVivaluxPricing(){
+  if(typeof location==="undefined"||location.origin!==BRIDGE_ORIGIN||window.VivaluxPricing)return;
+  await loadScript("/auth.js");
+  await loadScript("/pricing-config.js");
 }
 
-function provider(){return window.VivaFramePricingProvider||(window.VivaluxPricing?vivaluxProvider(window.VivaluxPricing):null)||(window.VivaFramePricingContext?.token?directProvider(window.VivaFramePricingContext):null)||(pricingPopup&&!pricingPopup.closed?popupProvider:null)}
-export async function connectFramePricing(apply:(config:FramePricingConfig)=>void){const active=provider();if(!active)return false;const payload=await active.loadConfig(PRODUCT_KEY);if(!payload?.config)return false;apply(payload.config);return true}
-export async function connectFramePricingInteractively(apply:(config:FramePricingConfig)=>void){const active=await openBridgeProvider();const payload=await active.loadConfig(PRODUCT_KEY);if(!payload?.config)return false;apply(payload.config);return true}
+function provider(){return window.VivaFramePricingProvider||(window.VivaluxPricing?vivaluxProvider(window.VivaluxPricing):null)||(window.VivaFramePricingContext?.token?directProvider(window.VivaFramePricingContext):null)}
+export async function connectFramePricing(apply:(config:FramePricingConfig)=>void){await ensureVivaluxPricing();const active=provider();if(!active)return false;const payload=await active.loadConfig(PRODUCT_KEY);if(!payload?.config)return false;apply(payload.config);return true}
+export async function connectFramePricingInteractively(){window.location.assign(`${BRIDGE_ORIGIN}/vivaframe/`);return false}
 export async function quoteFrame(takeoff:FrameTakeoff){const active=provider();if(!active)throw new Error("Pricing Engine context is not connected.");const payload=await active.quote(PRODUCT_KEY,takeoff);const calculation=payload.calculation&&typeof payload.calculation==="object"?payload.calculation as FramePricingQuote:payload;const rawTotal=calculation.total;const total=typeof rawTotal==="number"?rawTotal:rawTotal&&typeof rawTotal==="object"&&"sell" in rawTotal?Number((rawTotal as {sell:unknown}).sell):undefined;return {...calculation,...(typeof total==="number"&&Number.isFinite(total)?{total}:{})}}

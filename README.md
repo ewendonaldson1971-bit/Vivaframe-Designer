@@ -23,7 +23,7 @@ The designer generates a product-neutral frame takeoff and connects to pricing o
 
 When the designer runs inside Vivalux Builder, it automatically uses Builder's existing `window.VivaluxPricing` service. The service registers the `vivaframe` product configuration and sends takeoffs through the authenticated quote workflow.
 
-The standalone Netlify site connects through `https://vivalux4-client.netlify.app/pricing-bridge.html`. The bridge accepts requests only from the production VivaFrame Designer origin, restricts them to the `vivaframe` product, and uses the user's existing Vivalux session without sending the bearer token to the designer.
+The standalone Netlify site links to `https://vivalux4-client.netlify.app/vivaframe/` for authenticated pricing. Vivalux serves that route as a reverse proxy, so the designer can use the existing Vivalux session without moving its bearer token to another origin.
 
 For another host, the equivalent provider contract is:
 
