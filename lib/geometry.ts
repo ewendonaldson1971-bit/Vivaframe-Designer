@@ -114,17 +114,50 @@ function spacedPositions(min:number,max:number,spacing:number|null){
   const count=Math.max(0,Math.ceil(length/spacing)-1);
   return Array.from({length:count},(_,index)=>min+length*(index+1)/(count+1));
 }
+function internalCornerPositions(design:Design,orientation:"horizontal"|"vertical"){
+  const ring=pointsFor(design).slice(0,-1);
+  const area2=ring.reduce((sum,point,index)=>{const next=ring[(index+1)%ring.length];return sum+point.x*next.y-next.x*point.y},0);
+  if(!area2)return [];
+  return ring.flatMap((point,index)=>{
+    const previous=ring[(index-1+ring.length)%ring.length],next=ring[(index+1)%ring.length];
+    const cross=(point.x-previous.x)*(next.y-point.y)-(point.y-previous.y)*(next.x-point.x);
+    return cross*area2<0?[orientation==="horizontal"?point.x:point.y]:[];
+  });
+}
+function requiredInteriorCount(boundaries:number[],spacing:number){
+  return boundaries.slice(0,-1).reduce((count,start,index)=>count+Math.max(0,Math.ceil((boundaries[index+1]-start)/spacing)-1),0);
+}
+function preferredGapPositions(min:number,max:number,spacing:number,preferred:number[]){
+  const budget=Math.max(0,Math.ceil((max-min)/spacing)-1);
+  if(!budget)return [];
+  const candidates=[...new Set(preferred.filter(value=>value>min&&value<max))].sort((a,b)=>a-b).slice(0,16);
+  let chosen:number[]=[];
+  for(let mask=1;mask<(1<<candidates.length);mask++){
+    const selection=candidates.filter((_,index)=>mask&(1<<index));
+    if(selection.length<=chosen.length||selection.length>budget)continue;
+    const boundaries=[min,...selection,max];
+    if(selection.length+requiredInteriorCount(boundaries,spacing)<=budget)chosen=selection;
+  }
+  const boundaries=[min,...chosen,max];
+  return [...chosen,...boundaries.slice(0,-1).flatMap((start,index)=>spacedPositions(start,boundaries[index+1],spacing))];
+}
 function segmentSpacingPositions(design:Design,orientation:"horizontal"|"vertical",spacing:number|null){
-  const points=pointsFor(design),positions=design.segments.flatMap((segment,index)=>{
+  if(spacing==null||!Number.isFinite(spacing)||spacing<=0)return [];
+  const points=pointsFor(design),preferred=internalCornerPositions(design,orientation),positions:number[]=[];
+  const intervals=design.segments.flatMap((segment,index)=>{
     const horizontal=segment.heading==="E"||segment.heading==="W";
     if((orientation==="horizontal")!==horizontal)return [];
-    const a=points[index],b=points[index+1];
-    return orientation==="horizontal"?spacedPositions(Math.min(a.x,b.x),Math.max(a.x,b.x),spacing):spacedPositions(Math.min(a.y,b.y),Math.max(a.y,b.y),spacing);
+    const a=points[index],b=points[index+1],start=orientation==="horizontal"?a.x:a.y,end=orientation==="horizontal"?b.x:b.y;
+    return [{min:Math.min(start,end),max:Math.max(start,end)}];
+  }).sort((a,b)=>(b.max-b.min)-(a.max-a.min));
+  intervals.forEach(({min,max})=>{
+    const existing=positions.filter(value=>value>min&&value<max).sort((a,b)=>a-b),boundaries=[min,...existing,max];
+    boundaries.slice(0,-1).forEach((start,index)=>positions.push(...preferredGapPositions(start,boundaries[index+1],spacing,preferred)));
   });
   return [...new Set(positions.map(value=>Math.round(value*1e6)/1e6))].sort((a,b)=>a-b);
 }
 function paired(values:number[]){
-  const sorted=[...values].sort((a,b)=>a-b),result:Array<[number,number]>=[];
+  const sorted=[...new Set(values)].sort((a,b)=>a-b),result:Array<[number,number]>=[];
   for(let index=0;index+1<sorted.length;index+=2)if(sorted[index+1]>sorted[index])result.push([sorted[index],sorted[index+1]]);
   return result;
 }
@@ -139,12 +172,12 @@ export function crossBracePieces(design:Design,config:BraceConfig):BracePiece[]{
   const polygon=pointsFor(design),xs=polygon.map(point=>point.x),ys=polygon.map(point=>point.y),minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
   const verticalRaw=segmentSpacingPositions(design,"horizontal",config.horizontalSpacing).filter(x=>x>minX&&x<maxX).flatMap((x,xIndex)=>{
     const intersections:number[]=[];
-    design.segments.forEach((segment,index)=>{const a=polygon[index],b=polygon[index+1];if(a.y===b.y&&((a.x<=x&&x<b.x)||(b.x<=x&&x<a.x)))intersections.push(a.y)});
+    design.segments.forEach((segment,index)=>{const a=polygon[index],b=polygon[index+1];if(a.y===b.y&&x>=Math.min(a.x,b.x)&&x<=Math.max(a.x,b.x))intersections.push(a.y)});
     return paired(intersections).map(([y1,y2],spanIndex)=>({x,y1,y2,xIndex,spanIndex}));
   });
   const horizontalRaw=segmentSpacingPositions(design,"vertical",config.verticalSpacing).filter(y=>y>minY&&y<maxY).flatMap((y,yIndex)=>{
     const intersections:number[]=[];
-    design.segments.forEach((segment,index)=>{const a=polygon[index],b=polygon[index+1];if(a.x===b.x&&((a.y<=y&&y<b.y)||(b.y<=y&&y<a.y)))intersections.push(a.x)});
+    design.segments.forEach((segment,index)=>{const a=polygon[index],b=polygon[index+1];if(a.x===b.x&&y>=Math.min(a.y,b.y)&&y<=Math.max(a.y,b.y))intersections.push(a.x)});
     return paired(intersections).map(([x1,x2],spanIndex)=>({y,x1,x2,yIndex,spanIndex}));
   });
   const pieces:BracePiece[]=[];
