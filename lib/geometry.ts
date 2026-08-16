@@ -271,6 +271,41 @@ export function crossBracePiecesForDesigns(designs:Design[],config:BraceConfig):
   });
   return pieces;
 }
+export function braceHasSideConnection(piece:BracePiece,pieces:BracePiece[]){
+  const epsilon=1;
+  return pieces.some(other=>{
+    if(other.id===piece.id||other.orientation===piece.orientation)return false;
+    if(piece.orientation==="vertical"){
+      const hostX=piece.start.x,minY=Math.min(piece.start.y,piece.end.y),maxY=Math.max(piece.start.y,piece.end.y),connectionY=other.start.y;
+      const touchesSide=[other.start.x,other.end.x].some(x=>Math.abs(Math.abs(x-hostX)-piece.widthMm/2)<=epsilon||Math.abs(x-hostX)<=epsilon);
+      return touchesSide&&connectionY>minY&&connectionY<maxY;
+    }
+    const hostY=piece.start.y,minX=Math.min(piece.start.x,piece.end.x),maxX=Math.max(piece.start.x,piece.end.x),connectionX=other.start.x;
+    const touchesSide=[other.start.y,other.end.y].some(y=>Math.abs(Math.abs(y-hostY)-piece.widthMm/2)<=epsilon||Math.abs(y-hostY)<=epsilon);
+    return touchesSide&&connectionX>minX&&connectionX<maxX;
+  });
+}
+type BraceBoundary={coordinate:number;braceId:string|null;widthMm:number};
+export type ManualBraceResult={piece:BracePiece;intersectedBraceIds:string[]};
+export function createManualBrace(designs:Design[],existingBraces:BracePiece[],anchor:Point,orientation:"horizontal"|"vertical",offset:number,click:Point,kind:"h-brace"|"mini-brace",config:BraceConfig,id:string):ManualBraceResult|null{
+  const position=(orientation==="vertical"?anchor.x:anchor.y)+offset,boundaries:BraceBoundary[]=[];
+  designs.filter(isClosed).forEach(design=>{const points=pointsFor(design);design.segments.forEach((segment,index)=>{
+    const a=points[index],b=points[index+1];
+    if(orientation==="vertical"&&a.y===b.y&&position>=Math.min(a.x,b.x)&&position<=Math.max(a.x,b.x))boundaries.push({coordinate:a.y,braceId:null,widthMm:0});
+    if(orientation==="horizontal"&&a.x===b.x&&position>=Math.min(a.y,b.y)&&position<=Math.max(a.y,b.y))boundaries.push({coordinate:a.x,braceId:null,widthMm:0});
+  })});
+  existingBraces.filter(brace=>brace.orientation!==orientation).forEach(brace=>{
+    if(orientation==="vertical"&&position>=Math.min(brace.start.x,brace.end.x)&&position<=Math.max(brace.start.x,brace.end.x))boundaries.push({coordinate:brace.start.y,braceId:brace.id,widthMm:brace.widthMm});
+    if(orientation==="horizontal"&&position>=Math.min(brace.start.y,brace.end.y)&&position<=Math.max(brace.start.y,brace.end.y))boundaries.push({coordinate:brace.start.x,braceId:brace.id,widthMm:brace.widthMm});
+  });
+  const merged=[...boundaries.reduce((map,boundary)=>{const current=map.get(boundary.coordinate);if(!current||(!current.braceId&&boundary.braceId))map.set(boundary.coordinate,boundary);return map},new Map<number,BraceBoundary>()).values()].sort((a,b)=>a.coordinate-b.coordinate),clickCoordinate=orientation==="vertical"?click.y:click.x;
+  const lower=merged.filter(boundary=>boundary.coordinate<clickCoordinate).at(-1),upper=merged.find(boundary=>boundary.coordinate>clickCoordinate);
+  if(!lower||!upper)return null;
+  const lowerTrim=lower.braceId?Math.max(lower.widthMm,config.hBraceWidth)/2:Math.max(0,config.braceOffset)/2,upperTrim=upper.braceId?Math.max(upper.widthMm,config.hBraceWidth)/2:Math.max(0,config.braceOffset)/2,startCoordinate=lower.coordinate+lowerTrim,endCoordinate=upper.coordinate-upperTrim;
+  if(endCoordinate<=startCoordinate)return null;
+  const start=orientation==="vertical"?{x:position,y:startCoordinate}:{x:startCoordinate,y:position},end=orientation==="vertical"?{x:position,y:endCoordinate}:{x:endCoordinate,y:position};
+  return {piece:{id,kind,orientation,start,end,lengthMm:Math.max(1,Math.round(endCoordinate-startCoordinate)),widthMm:kind==="h-brace"?config.hBraceWidth:config.miniBraceWidth,tensionLocks:2},intersectedBraceIds:[lower.braceId,upper.braceId].filter((braceId):braceId is string=>!!braceId)};
+}
 export type GeometryIssue = { type: "zero-length" | "overlap" | "intersection"; segmentIds: string[] };
 function between(n:number,a:number,b:number){ return n>=Math.min(a,b)&&n<=Math.max(a,b); }
 export function geometryIssues(design: Design): GeometryIssue[] {
