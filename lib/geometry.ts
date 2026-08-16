@@ -306,6 +306,29 @@ export function createManualBrace(designs:Design[],existingBraces:BracePiece[],a
   const start=orientation==="vertical"?{x:position,y:startCoordinate}:{x:startCoordinate,y:position},end=orientation==="vertical"?{x:position,y:endCoordinate}:{x:endCoordinate,y:position};
   return {piece:{id,kind,orientation,start,end,lengthMm:Math.max(1,Math.round(endCoordinate-startCoordinate)),widthMm:kind==="h-brace"?config.hBraceWidth:config.miniBraceWidth,tensionLocks:2},intersectedBraceIds:[lower.braceId,upper.braceId].filter((braceId):braceId is string=>!!braceId)};
 }
+export type BraceDeletionResult={removedIds:string[];replacements:BracePiece[];promotedIds:string[]};
+export function deleteBraceAndExtend(designs:Design[],pieces:BracePiece[],targetId:string,config:BraceConfig,idPrefix:string):BraceDeletionResult{
+  const target=pieces.find(piece=>piece.id===targetId);if(!target)return {removedIds:[],replacements:[],promotedIds:[]};
+  const axis=(point:Point,orientation:"horizontal"|"vertical")=>orientation==="horizontal"?point.x:point.y;
+  const crossAxis=(point:Point,orientation:"horizontal"|"vertical")=>orientation==="horizontal"?point.y:point.x;
+  const targetCoordinate=crossAxis(target.start,target.orientation),targetMin=Math.min(axis(target.start,target.orientation),axis(target.end,target.orientation)),targetMax=Math.max(axis(target.start,target.orientation),axis(target.end,target.orientation));
+  const touchingEnd=(piece:BracePiece)=>{
+    if(piece.orientation===target.orientation)return null;
+    return (["start","end"] as const).find(end=>{const point=piece[end],along=target.orientation==="vertical"?point.y:point.x,across=target.orientation==="vertical"?point.x:point.y;return along>targetMin&&along<targetMax&&(Math.abs(Math.abs(across-targetCoordinate)-target.widthMm/2)<=1||Math.abs(across-targetCoordinate)<=1)})??null;
+  };
+  const connected=pieces.flatMap(piece=>{const end=piece.id===targetId?null:touchingEnd(piece);return end?[{piece,end}]:[]}),removedIds=[targetId,...connected.map(item=>item.piece.id)],remaining=pieces.filter(piece=>!removedIds.includes(piece.id)),promotedIds=new Set<string>(),replacements:BracePiece[]=[];
+  connected.forEach(({piece,end},index)=>{
+    const orientation=piece.orientation,lineCoordinate=crossAxis(piece.start,orientation),fixedPoint=end==="start"?piece.end:piece.start,fixedCoordinate=axis(fixedPoint,orientation),direction=Math.sign(targetCoordinate-fixedCoordinate)||1,boundaries:BraceBoundary[]=[];
+    designs.filter(isClosed).forEach(design=>{const points=pointsFor(design);design.segments.forEach((segment,segmentIndex)=>{const a=points[segmentIndex],b=points[segmentIndex+1];if(orientation==="horizontal"&&a.x===b.x&&lineCoordinate>=Math.min(a.y,b.y)&&lineCoordinate<=Math.max(a.y,b.y))boundaries.push({coordinate:a.x,braceId:null,widthMm:0});if(orientation==="vertical"&&a.y===b.y&&lineCoordinate>=Math.min(a.x,b.x)&&lineCoordinate<=Math.max(a.x,b.x))boundaries.push({coordinate:a.y,braceId:null,widthMm:0})})});
+    remaining.filter(candidate=>candidate.orientation!==orientation).forEach(candidate=>{if(orientation==="horizontal"&&lineCoordinate>=Math.min(candidate.start.y,candidate.end.y)&&lineCoordinate<=Math.max(candidate.start.y,candidate.end.y))boundaries.push({coordinate:candidate.start.x,braceId:candidate.id,widthMm:candidate.widthMm});if(orientation==="vertical"&&lineCoordinate>=Math.min(candidate.start.x,candidate.end.x)&&lineCoordinate<=Math.max(candidate.start.x,candidate.end.x))boundaries.push({coordinate:candidate.start.y,braceId:candidate.id,widthMm:candidate.widthMm})});
+    const candidates=boundaries.filter(boundary=>direction>0?boundary.coordinate>targetCoordinate+1:boundary.coordinate<targetCoordinate-1).sort((a,b)=>direction>0?a.coordinate-b.coordinate:b.coordinate-a.coordinate),boundary=candidates[0];if(!boundary)return;
+    const trim=boundary.braceId?Math.max(boundary.widthMm,config.hBraceWidth)/2:Math.max(0,config.braceOffset)/2,newCoordinate=boundary.coordinate-direction*trim,movingPoint=orientation==="horizontal"?{x:newCoordinate,y:lineCoordinate}:{x:lineCoordinate,y:newCoordinate},start=end==="start"?movingPoint:fixedPoint,endPoint=end==="end"?movingPoint:fixedPoint,lengthMm=Math.max(1,Math.round(Math.hypot(endPoint.x-start.x,endPoint.y-start.y)));
+    if(boundary.braceId)promotedIds.add(boundary.braceId);
+    replacements.push({...piece,id:`${idPrefix}-${index}`,start,end:endPoint,lengthMm});
+  });
+  const unique=replacements.filter((piece,index,all)=>all.findIndex(candidate=>candidate.orientation===piece.orientation&&Math.abs(candidate.start.x-piece.start.x)<1&&Math.abs(candidate.start.y-piece.start.y)<1&&Math.abs(candidate.end.x-piece.end.x)<1&&Math.abs(candidate.end.y-piece.end.y)<1)===index);
+  return {removedIds,replacements:unique,promotedIds:[...promotedIds]};
+}
 export type GeometryIssue = { type: "zero-length" | "overlap" | "intersection"; segmentIds: string[] };
 function between(n:number,a:number,b:number){ return n>=Math.min(a,b)&&n<=Math.max(a,b); }
 export function geometryIssues(design: Design): GeometryIssue[] {
