@@ -124,6 +124,35 @@ function internalCornerPositions(design:Design,orientation:"horizontal"|"vertica
     return cross*area2<0?[orientation==="horizontal"?point.x:point.y]:[];
   });
 }
+function ringFor(design:Design){return pointsFor(design).slice(0,-1)}
+function pointOnSegment(point:Point,a:Point,b:Point){
+  const cross=(point.x-a.x)*(b.y-a.y)-(point.y-a.y)*(b.x-a.x);
+  return Math.abs(cross)<1e-7&&point.x>=Math.min(a.x,b.x)&&point.x<=Math.max(a.x,b.x)&&point.y>=Math.min(a.y,b.y)&&point.y<=Math.max(a.y,b.y);
+}
+function pointInPolygon(point:Point,design:Design){
+  const ring=ringFor(design);
+  if(ring.some((a,index)=>pointOnSegment(point,a,ring[(index+1)%ring.length])))return false;
+  let inside=false;
+  for(let index=0,j=ring.length-1;index<ring.length;j=index++){
+    const a=ring[index],b=ring[j];
+    if((a.y>point.y)!==(b.y>point.y)&&point.x<(b.x-a.x)*(point.y-a.y)/(b.y-a.y)+a.x)inside=!inside;
+  }
+  return inside;
+}
+export function seriesNestingDepths(designs:Design[]){
+  return designs.map((candidate,candidateIndex)=>isClosed(candidate)?designs.reduce((depth,container,containerIndex)=>{
+    if(containerIndex===candidateIndex||!isClosed(container))return depth;
+    const candidateRing=ringFor(candidate);
+    return candidateRing.length&&candidateRing.every(point=>pointInPolygon(point,container))?depth+1:depth;
+  },0):0);
+}
+export function profileFacingSides(designs:Design[]){
+  const depths=seriesNestingDepths(designs);
+  return designs.map((design,index)=>{
+    const ring=ringFor(design),area2=ring.reduce((sum,point,pointIndex)=>{const next=ring[(pointIndex+1)%ring.length];return sum+point.x*next.y-next.x*point.y},0);
+    return (area2<0?-1:1)*(depths[index]%2?-1:1);
+  });
+}
 function requiredInteriorCount(boundaries:number[],spacing:number){
   return boundaries.slice(0,-1).reduce((count,start,index)=>count+Math.max(0,Math.ceil((boundaries[index+1]-start)/spacing)-1),0);
 }
@@ -149,6 +178,25 @@ function segmentSpacingPositions(design:Design,orientation:"horizontal"|"vertica
     if((orientation==="horizontal")!==horizontal)return [];
     const a=points[index],b=points[index+1],start=orientation==="horizontal"?a.x:a.y,end=orientation==="horizontal"?b.x:b.y;
     return [{min:Math.min(start,end),max:Math.max(start,end)}];
+  }).sort((a,b)=>(b.max-b.min)-(a.max-a.min));
+  intervals.forEach(({min,max})=>{
+    const existing=positions.filter(value=>value>min&&value<max).sort((a,b)=>a-b),boundaries=[min,...existing,max];
+    boundaries.slice(0,-1).forEach((start,index)=>positions.push(...preferredGapPositions(start,boundaries[index+1],spacing,preferred)));
+  });
+  return [...new Set(positions.map(value=>Math.round(value*1e6)/1e6))].sort((a,b)=>a-b);
+}
+function assemblySpacingPositions(designs:Design[],orientation:"horizontal"|"vertical",spacing:number|null,depths:number[]){
+  if(spacing==null||!Number.isFinite(spacing)||spacing<=0)return [];
+  const preferred=designs.flatMap((design,index)=>depths[index]>0?ringFor(design).map(point=>orientation==="horizontal"?point.x:point.y):[]);
+  const positions:number[]=[];
+  const intervals=designs.flatMap(design=>{
+    const points=pointsFor(design);
+    return design.segments.flatMap((segment,index)=>{
+      const horizontal=segment.heading==="E"||segment.heading==="W";
+      if((orientation==="horizontal")!==horizontal)return [];
+      const a=points[index],b=points[index+1],start=orientation==="horizontal"?a.x:a.y,end=orientation==="horizontal"?b.x:b.y;
+      return [{min:Math.min(start,end),max:Math.max(start,end)}];
+    });
   }).sort((a,b)=>(b.max-b.min)-(a.max-a.min));
   intervals.forEach(({min,max})=>{
     const existing=positions.filter(value=>value>min&&value<max).sort((a,b)=>a-b),boundaries=[min,...existing,max];
@@ -190,6 +238,35 @@ export function crossBracePieces(design:Design,config:BraceConfig):BracePiece[]{
       const x1=boundaries[pieceIndex],x2=boundaries[pieceIndex+1],lengthMm=Math.max(1,Math.round(x2-x1-25));
       const start={x:x1+(pieceIndex===lastPieceIndex?config.hBraceWidth/2:0),y:raw.y},end={x:x2-(pieceIndex===0?config.hBraceWidth/2:0),y:raw.y};
       pieces.push({id:`m-${raw.yIndex}-${raw.spanIndex}-${pieceIndex}`,kind:"mini-brace",orientation:"horizontal",start,end,lengthMm,widthMm:config.miniBraceWidth,tensionLocks:2});
+    });
+  });
+  return pieces;
+}
+export function crossBracePiecesForDesigns(designs:Design[],config:BraceConfig):BracePiece[]{
+  const closed=designs.filter(isClosed),depths=seriesNestingDepths(closed);
+  if(!closed.length)return [];
+  if(!depths.some(depth=>depth>0))return closed.flatMap((design,index)=>crossBracePieces(design,config).map(piece=>({...piece,id:`s${index}-${piece.id}`})));
+  const polygons=closed.map(pointsFor),allPoints=polygons.flat(),xs=allPoints.map(point=>point.x),ys=allPoints.map(point=>point.y),minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+  const verticalRaw=assemblySpacingPositions(closed,"horizontal",config.horizontalSpacing,depths).filter(x=>x>minX&&x<maxX).flatMap((x,xIndex)=>{
+    const intersections:number[]=[];
+    closed.forEach((design,designIndex)=>design.segments.forEach((segment,index)=>{const a=polygons[designIndex][index],b=polygons[designIndex][index+1];if(a.y===b.y&&x>=Math.min(a.x,b.x)&&x<=Math.max(a.x,b.x))intersections.push(a.y)}));
+    return paired(intersections).map(([y1,y2],spanIndex)=>({x,y1,y2,xIndex,spanIndex}));
+  });
+  const horizontalRaw=assemblySpacingPositions(closed,"vertical",config.verticalSpacing,depths).filter(y=>y>minY&&y<maxY).flatMap((y,yIndex)=>{
+    const intersections:number[]=[];
+    closed.forEach((design,designIndex)=>design.segments.forEach((segment,index)=>{const a=polygons[designIndex][index],b=polygons[designIndex][index+1];if(a.x===b.x&&y>=Math.min(a.y,b.y)&&y<=Math.max(a.y,b.y))intersections.push(a.x)}));
+    return paired(intersections).map(([x1,x2],spanIndex)=>({y,x1,x2,yIndex,spanIndex}));
+  });
+  const pieces:BracePiece[]=[];
+  verticalRaw.forEach(raw=>{const cut=shorten({x:raw.x,y:raw.y1},{x:raw.x,y:raw.y2},config.braceOffset);pieces.push({id:`av-${raw.xIndex}-${raw.spanIndex}`,kind:"h-brace",orientation:"vertical",...cut,widthMm:config.hBraceWidth,tensionLocks:2})});
+  horizontalRaw.forEach(raw=>{
+    const crossings=verticalRaw.filter(vertical=>vertical.x>raw.x1&&vertical.x<raw.x2&&raw.y>vertical.y1&&raw.y<vertical.y2).map(vertical=>vertical.x).sort((a,b)=>a-b);
+    if(!crossings.length){const cut=shorten({x:raw.x1,y:raw.y},{x:raw.x2,y:raw.y},config.braceOffset);pieces.push({id:`ah-${raw.yIndex}-${raw.spanIndex}`,kind:"h-brace",orientation:"horizontal",...cut,widthMm:config.hBraceWidth,tensionLocks:2});return}
+    const boundaries=[raw.x1,...crossings,raw.x2],lastPieceIndex=boundaries.length-2;
+    [0,lastPieceIndex].filter((pieceIndex,index,all)=>all.indexOf(pieceIndex)===index).forEach(pieceIndex=>{
+      const x1=boundaries[pieceIndex],x2=boundaries[pieceIndex+1],lengthMm=Math.max(1,Math.round(x2-x1-25));
+      const start={x:x1+(pieceIndex===lastPieceIndex?config.hBraceWidth/2:0),y:raw.y},end={x:x2-(pieceIndex===0?config.hBraceWidth/2:0),y:raw.y};
+      pieces.push({id:`am-${raw.yIndex}-${raw.spanIndex}-${pieceIndex}`,kind:"mini-brace",orientation:"horizontal",start,end,lengthMm,widthMm:config.miniBraceWidth,tensionLocks:2});
     });
   });
   return pieces;
@@ -237,7 +314,7 @@ export function prepareFrameTakeoffForDesigns(designs: Design[], profileId: stri
     finishId,
     quantity,
     cutPieces: takeoffs.flatMap(takeoff => takeoff.cutPieces),
-    bracePieces: braceConfig?designs.flatMap(design=>crossBracePieces(design,braceConfig).map(piece=>({kind:piece.kind,orientation:piece.orientation,lengthMm:piece.lengthMm}))):[],
+    bracePieces: braceConfig?crossBracePiecesForDesigns(designs,braceConfig).map(piece=>({kind:piece.kind,orientation:piece.orientation,lengthMm:piece.lengthMm})):[],
     accessories: [...accessoryQuantities].map(([mappingKey,accessoryQuantity]) => ({mappingKey,quantity:accessoryQuantity})),
   };
 }
