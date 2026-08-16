@@ -5,7 +5,7 @@ const TOKEN_KEY = "vivaFramePricingToken";
 const USER_KEY = "vivaFramePricingUser";
 const PRODUCT_KEY = "vivaframe";
 
-export type ExtrusionConfigRow = { id:string; extrusion:string; weight:number; width:number; height:number; unit:string; priceSilver:number; braceOffset:number|null };
+export type ExtrusionConfigRow = { id:string; extrusion:string; weight:number; width:number; height:number; unit:string; priceSilver:number; braceOffset:number|null; horizontalCrossBraceSpacing:number|null; verticalCrossBraceSpacing:number|null };
 export type EligibleExtrusionConfigRow = { id:string; label:string; extrusionId:string|null; enabled:boolean; position:number; source:ExtrusionConfigRow|null };
 export type FramePricingConfig = { extrusions:ExtrusionConfigRow[]; eligibleExtrusions:EligibleExtrusionConfigRow[]; [key:string]:unknown };
 export type FramePricingQuote = { subtotal?:number; discount?:number; tax?:number; total?:number; currency?:string; lines?:unknown[]; calculatedAt?:string; [key:string]:unknown };

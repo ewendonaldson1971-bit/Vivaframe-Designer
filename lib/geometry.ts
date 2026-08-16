@@ -3,6 +3,8 @@ export type Turn = "left" | "straight" | "right" | "back";
 export type Point = { x: number; y: number };
 export type Segment = { id: string; heading: Heading; length: number; turn: Turn };
 export type Design = { start: Point; initialHeading: Heading | null; segments: Segment[] };
+export type BraceConfig = { horizontalSpacing: number | null; verticalSpacing: number | null; braceOffset: number; hBraceWidth: number; miniBraceWidth: number };
+export type BracePiece = { id: string; kind: "h-brace" | "mini-brace"; orientation: "horizontal" | "vertical"; start: Point; end: Point; lengthMm: number; widthMm: number; tensionLocks: number };
 
 const headings: Heading[] = ["N", "E", "S", "W"];
 export function turnHeading(heading: Heading, turn: Turn): Heading {
@@ -106,6 +108,54 @@ export function splitForStock(length: number, stock = 5600): number[] {
   if (remaining) result.push(remaining);
   return result;
 }
+function spacedPositions(min:number,max:number,spacing:number|null){
+  const length=max-min;
+  if(spacing==null||!Number.isFinite(spacing)||spacing<=0||length<=0)return [];
+  const count=Math.max(0,Math.ceil(length/spacing)-1);
+  return Array.from({length:count},(_,index)=>min+length*(index+1)/(count+1));
+}
+function segmentSpacingPositions(design:Design,orientation:"horizontal"|"vertical",spacing:number|null){
+  const points=pointsFor(design),positions=design.segments.flatMap((segment,index)=>{
+    const horizontal=segment.heading==="E"||segment.heading==="W";
+    if((orientation==="horizontal")!==horizontal)return [];
+    const a=points[index],b=points[index+1];
+    return orientation==="horizontal"?spacedPositions(Math.min(a.x,b.x),Math.max(a.x,b.x),spacing):spacedPositions(Math.min(a.y,b.y),Math.max(a.y,b.y),spacing);
+  });
+  return [...new Set(positions.map(value=>Math.round(value*1e6)/1e6))].sort((a,b)=>a-b);
+}
+function paired(values:number[]){
+  const sorted=[...values].sort((a,b)=>a-b),result:Array<[number,number]>=[];
+  for(let index=0;index+1<sorted.length;index+=2)if(sorted[index+1]>sorted[index])result.push([sorted[index],sorted[index+1]]);
+  return result;
+}
+function shorten(start:Point,end:Point,deduction:number){
+  const length=Math.hypot(end.x-start.x,end.y-start.y),trim=Math.min(Math.max(0,deduction),Math.max(0,length-1))/2;
+  if(!length)return {start,end,lengthMm:0};
+  const ux=(end.x-start.x)/length,uy=(end.y-start.y)/length;
+  return {start:{x:start.x+ux*trim,y:start.y+uy*trim},end:{x:end.x-ux*trim,y:end.y-uy*trim},lengthMm:Math.max(1,Math.round(length-trim*2))};
+}
+export function crossBracePieces(design:Design,config:BraceConfig):BracePiece[]{
+  if(!isClosed(design))return [];
+  const polygon=pointsFor(design),xs=polygon.map(point=>point.x),ys=polygon.map(point=>point.y),minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+  const verticalRaw=segmentSpacingPositions(design,"horizontal",config.horizontalSpacing).filter(x=>x>minX&&x<maxX).flatMap((x,xIndex)=>{
+    const intersections:number[]=[];
+    design.segments.forEach((segment,index)=>{const a=polygon[index],b=polygon[index+1];if(a.y===b.y&&((a.x<=x&&x<b.x)||(b.x<=x&&x<a.x)))intersections.push(a.y)});
+    return paired(intersections).map(([y1,y2],spanIndex)=>({x,y1,y2,xIndex,spanIndex}));
+  });
+  const horizontalRaw=segmentSpacingPositions(design,"vertical",config.verticalSpacing).filter(y=>y>minY&&y<maxY).flatMap((y,yIndex)=>{
+    const intersections:number[]=[];
+    design.segments.forEach((segment,index)=>{const a=polygon[index],b=polygon[index+1];if(a.x===b.x&&((a.y<=y&&y<b.y)||(b.y<=y&&y<a.y)))intersections.push(a.x)});
+    return paired(intersections).map(([x1,x2],spanIndex)=>({y,x1,x2,yIndex,spanIndex}));
+  });
+  const pieces:BracePiece[]=[];
+  verticalRaw.forEach(raw=>{const cut=shorten({x:raw.x,y:raw.y1},{x:raw.x,y:raw.y2},config.braceOffset);pieces.push({id:`v-${raw.xIndex}-${raw.spanIndex}`,kind:"h-brace",orientation:"vertical",...cut,widthMm:config.hBraceWidth,tensionLocks:2})});
+  horizontalRaw.forEach(raw=>{
+    const crossings=verticalRaw.filter(vertical=>vertical.x>raw.x1&&vertical.x<raw.x2&&raw.y>vertical.y1&&raw.y<vertical.y2).map(vertical=>vertical.x).sort((a,b)=>a-b);
+    if(!crossings.length){const cut=shorten({x:raw.x1,y:raw.y},{x:raw.x2,y:raw.y},config.braceOffset);pieces.push({id:`h-${raw.yIndex}-${raw.spanIndex}`,kind:"h-brace",orientation:"horizontal",...cut,widthMm:config.hBraceWidth,tensionLocks:2});return}
+    [raw.x1,...crossings,raw.x2].slice(0,-1).forEach((x1,pieceIndex)=>{const x2=[...crossings,raw.x2][pieceIndex],cut=shorten({x:x1,y:raw.y},{x:x2,y:raw.y},25);pieces.push({id:`m-${raw.yIndex}-${raw.spanIndex}-${pieceIndex}`,kind:"mini-brace",orientation:"horizontal",...cut,widthMm:config.miniBraceWidth,tensionLocks:2})});
+  });
+  return pieces;
+}
 export type GeometryIssue = { type: "zero-length" | "overlap" | "intersection"; segmentIds: string[] };
 function between(n:number,a:number,b:number){ return n>=Math.min(a,b)&&n<=Math.max(a,b); }
 export function geometryIssues(design: Design): GeometryIssue[] {
@@ -134,13 +184,13 @@ export function rectangle(width = 2400, height = 1800): Design {
   ] };
 }
 
-export type FrameTakeoff = { profileId: string; finishId: string; quantity: number; cutPieces: { lengthMm: number; leftCut: "45" | "90"; rightCut: "45" | "90" }[]; accessories: { mappingKey: string; quantity: number }[] };
+export type FrameTakeoff = { profileId: string; finishId: string; quantity: number; cutPieces: { lengthMm: number; leftCut: "45" | "90"; rightCut: "45" | "90" }[]; bracePieces: { kind:"h-brace"|"mini-brace"; orientation:"horizontal"|"vertical"; lengthMm:number }[]; accessories: { mappingKey: string; quantity: number }[] };
 export function prepareFrameTakeoff(design: Design, profileId: string, finishId: string, quantity = 1): FrameTakeoff {
   const cutPieces = design.segments.flatMap(s => splitForStock(s.length).map((lengthMm, i, all) => ({ lengthMm, leftCut: (i === 0 ? "45" : "90") as "45"|"90", rightCut: (i === all.length - 1 ? "45" : "90") as "45"|"90" })));
   const joins = cutPieces.length - design.segments.length;
-  return { profileId, finishId, quantity, cutPieces, accessories: [{ mappingKey: "corner_component", quantity: summary(design).corners }, ...(joins ? [{ mappingKey: "straight_joiner", quantity: joins }] : [])] };
+  return { profileId, finishId, quantity, cutPieces, bracePieces:[], accessories: [{ mappingKey: "corner_component", quantity: summary(design).corners }, ...(joins ? [{ mappingKey: "straight_joiner", quantity: joins }] : [])] };
 }
-export function prepareFrameTakeoffForDesigns(designs: Design[], profileId: string, finishId: string, quantity = 1): FrameTakeoff {
+export function prepareFrameTakeoffForDesigns(designs: Design[], profileId: string, finishId: string, quantity = 1, braceConfig?:BraceConfig): FrameTakeoff {
   const takeoffs = designs.filter(design => design.segments.length).map(design => prepareFrameTakeoff(design, profileId, finishId));
   const accessoryQuantities = new Map<string,number>();
   takeoffs.flatMap(takeoff => takeoff.accessories).forEach(accessory => accessoryQuantities.set(accessory.mappingKey,(accessoryQuantities.get(accessory.mappingKey)??0)+accessory.quantity));
@@ -149,6 +199,7 @@ export function prepareFrameTakeoffForDesigns(designs: Design[], profileId: stri
     finishId,
     quantity,
     cutPieces: takeoffs.flatMap(takeoff => takeoff.cutPieces),
+    bracePieces: braceConfig?designs.flatMap(design=>crossBracePieces(design,braceConfig).map(piece=>({kind:piece.kind,orientation:piece.orientation,lengthMm:piece.lengthMm}))):[],
     accessories: [...accessoryQuantities].map(([mappingKey,accessoryQuantity]) => ({mappingKey,quantity:accessoryQuantity})),
   };
 }
