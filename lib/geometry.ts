@@ -229,10 +229,10 @@ export function crossBracePieces(design:Design,config:BraceConfig):BracePiece[]{
     return paired(intersections).map(([x1,x2],spanIndex)=>({y,x1,x2,yIndex,spanIndex}));
   });
   const pieces:BracePiece[]=[];
-  verticalRaw.forEach(raw=>{const cut=shorten({x:raw.x,y:raw.y1},{x:raw.x,y:raw.y2},config.braceOffset);pieces.push({id:`v-${raw.xIndex}-${raw.spanIndex}`,kind:"h-brace",orientation:"vertical",...cut,widthMm:config.hBraceWidth,tensionLocks:2})});
+  verticalRaw.forEach(raw=>{const hasSideBrace=horizontalRaw.some(horizontal=>raw.x>horizontal.x1&&raw.x<horizontal.x2&&horizontal.y>raw.y1&&horizontal.y<raw.y2),kind=hasSideBrace?"h-brace":"mini-brace",cut=shorten({x:raw.x,y:raw.y1},{x:raw.x,y:raw.y2},config.braceOffset);pieces.push({id:`v-${raw.xIndex}-${raw.spanIndex}`,kind,orientation:"vertical",...cut,widthMm:hasSideBrace?config.hBraceWidth:config.miniBraceWidth,tensionLocks:2})});
   horizontalRaw.forEach(raw=>{
     const crossings=verticalRaw.filter(vertical=>vertical.x>raw.x1&&vertical.x<raw.x2&&raw.y>vertical.y1&&raw.y<vertical.y2).map(vertical=>vertical.x).sort((a,b)=>a-b);
-    if(!crossings.length){const cut=shorten({x:raw.x1,y:raw.y},{x:raw.x2,y:raw.y},config.braceOffset);pieces.push({id:`h-${raw.yIndex}-${raw.spanIndex}`,kind:"h-brace",orientation:"horizontal",...cut,widthMm:config.hBraceWidth,tensionLocks:2});return}
+    if(!crossings.length){const cut=shorten({x:raw.x1,y:raw.y},{x:raw.x2,y:raw.y},config.braceOffset);pieces.push({id:`h-${raw.yIndex}-${raw.spanIndex}`,kind:"mini-brace",orientation:"horizontal",...cut,widthMm:config.miniBraceWidth,tensionLocks:2});return}
     const boundaries=[raw.x1,...crossings,raw.x2],lastPieceIndex=boundaries.length-2;
     [0,lastPieceIndex].filter((pieceIndex,index,all)=>all.indexOf(pieceIndex)===index).forEach(pieceIndex=>{
       const x1=boundaries[pieceIndex],x2=boundaries[pieceIndex+1],lengthMm=Math.max(1,Math.round(x2-x1-25));
@@ -258,10 +258,10 @@ export function crossBracePiecesForDesigns(designs:Design[],config:BraceConfig):
     return paired(intersections).map(([x1,x2],spanIndex)=>({y,x1,x2,yIndex,spanIndex}));
   });
   const pieces:BracePiece[]=[];
-  verticalRaw.forEach(raw=>{const cut=shorten({x:raw.x,y:raw.y1},{x:raw.x,y:raw.y2},config.braceOffset);pieces.push({id:`av-${raw.xIndex}-${raw.spanIndex}`,kind:"h-brace",orientation:"vertical",...cut,widthMm:config.hBraceWidth,tensionLocks:2})});
+  verticalRaw.forEach(raw=>{const hasSideBrace=horizontalRaw.some(horizontal=>raw.x>horizontal.x1&&raw.x<horizontal.x2&&horizontal.y>raw.y1&&horizontal.y<raw.y2),kind=hasSideBrace?"h-brace":"mini-brace",cut=shorten({x:raw.x,y:raw.y1},{x:raw.x,y:raw.y2},config.braceOffset);pieces.push({id:`av-${raw.xIndex}-${raw.spanIndex}`,kind,orientation:"vertical",...cut,widthMm:hasSideBrace?config.hBraceWidth:config.miniBraceWidth,tensionLocks:2})});
   horizontalRaw.forEach(raw=>{
     const crossings=verticalRaw.filter(vertical=>vertical.x>raw.x1&&vertical.x<raw.x2&&raw.y>vertical.y1&&raw.y<vertical.y2).map(vertical=>vertical.x).sort((a,b)=>a-b);
-    if(!crossings.length){const cut=shorten({x:raw.x1,y:raw.y},{x:raw.x2,y:raw.y},config.braceOffset);pieces.push({id:`ah-${raw.yIndex}-${raw.spanIndex}`,kind:"h-brace",orientation:"horizontal",...cut,widthMm:config.hBraceWidth,tensionLocks:2});return}
+    if(!crossings.length){const cut=shorten({x:raw.x1,y:raw.y},{x:raw.x2,y:raw.y},config.braceOffset);pieces.push({id:`ah-${raw.yIndex}-${raw.spanIndex}`,kind:"mini-brace",orientation:"horizontal",...cut,widthMm:config.miniBraceWidth,tensionLocks:2});return}
     const boundaries=[raw.x1,...crossings,raw.x2],lastPieceIndex=boundaries.length-2;
     [0,lastPieceIndex].filter((pieceIndex,index,all)=>all.indexOf(pieceIndex)===index).forEach(pieceIndex=>{
       const x1=boundaries[pieceIndex],x2=boundaries[pieceIndex+1],lengthMm=Math.max(1,Math.round(x2-x1-25));
